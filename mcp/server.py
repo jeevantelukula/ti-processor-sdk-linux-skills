@@ -250,9 +250,14 @@ async def _ensure_catalog() -> list[dict[str, str]]:
         if _CATALOG is not None and (now - _CATALOG_LOADED_AT) < _CATALOG_TTL:
             return _CATALOG
         if _LOCAL_DOCS_ROOT is not None:
-            # Nightly build root (swubn04-style): scan {device}-evm/{build}/processor-sdk-{os}-docs/
+            # Nightly build root on disk: scan {device}-evm/{build}/processor-sdk-{os}-docs/
             _CATALOG = _catalog_from_local_root(_LOCAL_DOCS_ROOT)
             sys.stderr.write(f"Catalog: {len(_CATALOG)} variants (local root {_LOCAL_DOCS_ROOT})\n")
+        elif _HTTP_DOCS_ROOT is not None:
+            # Nightly build root served via HTTP (nginx autoindex):
+            # {root}/{device}-evm/{build}/processor-sdk-{os}-docs/
+            _CATALOG = await _catalog_from_http_root(_HTTP_DOCS_ROOT)
+            sys.stderr.write(f"Catalog: {len(_CATALOG)} variants (HTTP root {_HTTP_DOCS_ROOT})\n")
         elif _LOCAL_CONFIGS is not None:
             # processor-sdk-doc configs/ dir (processor-sdk-doc repo clone)
             _CATALOG = _catalog_from_local(_LOCAL_CONFIGS)
@@ -416,6 +421,121 @@ def _catalog_from_local_root(root: Path) -> list[dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
+# HTTP docs root — multi-variant HTTP read (swubn04-style nginx autoindex)
+#
+# Set TI_SDK_DOCS_HTTP_ROOT to the nginx-served nightly build root, e.g.:
+#   http://swubn04.india.englab.ti.com/smpusdk-docs-build
+#
+# Expected structure (same as local root, but served over HTTP):
+#   {root}/{device}-evm/{build_id}_{date}/processor-sdk-{os}-docs/searchindex.js
+#
+# Catalog discovery parses nginx autoindex HTML to enumerate device dirs and
+# build dirs. "latest" = highest numeric build ID. Requires autoindex on in nginx.
+# ---------------------------------------------------------------------------
+
+_HTTP_DOCS_ROOT: str | None = _os.environ.get("TI_SDK_DOCS_HTTP_ROOT", "").rstrip("/") or None
+
+if _HTTP_DOCS_ROOT is not None:
+    try:
+        _check_url_host(_HTTP_DOCS_ROOT, "TI_SDK_DOCS_HTTP_ROOT")
+    except ValueError as _ssrf_exc2:
+        sys.stderr.write(f"ERROR: {_ssrf_exc2}\n")
+        sys.exit(1)
+
+# Regex to extract href names from nginx autoindex HTML
+_AUTOINDEX_HREF_RE = re.compile(r'href="([^"?/][^"]*?/)"')
+
+
+async def _http_list_dir(url: str) -> list[str]:
+    """Fetch nginx autoindex page and return list of directory entry names."""
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            async with _http_semaphore():
+                r = await client.get(url.rstrip("/") + "/")
+            if r.status_code != 200:
+                return []
+            return _AUTOINDEX_HREF_RE.findall(r.text)
+    except httpx.RequestError:
+        return []
+
+
+async def _http_latest_build(root: str, device_evm: str, os_type: str) -> str | None:
+    """Return URL of latest (highest build ID) docs dir for device+os, or None."""
+    entries = await _http_list_dir(f"{root}/{device_evm}")
+    os_docs_name = _local_os_docs_dir(os_type)
+    candidates: list[tuple[int, str]] = []
+    for entry in entries:
+        name = entry.rstrip("/")
+        try:
+            build_id = int(name.split("_")[0])
+        except (ValueError, IndexError):
+            continue
+        candidates.append((build_id, name))
+    if not candidates:
+        return None
+    _, best_build = max(candidates, key=lambda x: x[0])
+    url = f"{root}/{device_evm}/{best_build}/{os_docs_name}"
+    # Verify searchindex.js exists at this path
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            async with _http_semaphore():
+                r = await client.head(f"{url}/searchindex.js")
+            if r.status_code == 200:
+                return url
+    except httpx.RequestError:
+        pass
+    return None
+
+
+async def _resolve_http_docs(device: str, os_type: str, version: str) -> str | None:
+    """Resolve HTTP docs base URL for (device, os_type, version). None if unavailable."""
+    if _HTTP_DOCS_ROOT is None:
+        return None
+    device_evm = _local_device_dir(device)   # AM62XX -> am62xx-evm
+    os_docs_name = _local_os_docs_dir(os_type)
+    if version == "latest":
+        return await _http_latest_build(_HTTP_DOCS_ROOT, device_evm, os_type)
+    # Specific version: find build dir containing version as substring
+    entries = await _http_list_dir(f"{_HTTP_DOCS_ROOT}/{device_evm}")
+    for entry in sorted(entries):
+        name = entry.rstrip("/")
+        if version not in name:
+            continue
+        url = f"{_HTTP_DOCS_ROOT}/{device_evm}/{name}/{os_docs_name}"
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                async with _http_semaphore():
+                    r = await client.head(f"{url}/searchindex.js")
+                if r.status_code == 200:
+                    return url
+        except httpx.RequestError:
+            pass
+    return None
+
+
+async def _catalog_from_http_root(root: str) -> list[dict[str, str]]:
+    """Discover (device, os) combos by parsing nginx autoindex at root URL."""
+    known_os = ["linux", "debian", "buildroot", "android", "edgeai"]
+    device_entries = await _http_list_dir(root)
+    device_entries = [e.rstrip("/") for e in device_entries if e.rstrip("/").endswith("-evm")]
+
+    result = []
+    # Fan out: check all (device, os) pairs concurrently
+    async def _probe(device_evm: str, os_type: str) -> dict | None:
+        device = device_evm[:-4].upper()  # am62xx-evm -> AM62XX
+        url = await _http_latest_build(root, device_evm, os_type)
+        return {"device": device, "os": os_type} if url else None
+
+    tasks = [
+        _probe(d, o)
+        for d in device_entries
+        for o in known_os
+    ]
+    found = await asyncio.gather(*tasks)
+    return [f for f in found if f is not None]
+
+
+# ---------------------------------------------------------------------------
 # Legacy env var backward compat (TI_SDK_DOCS_URL / TI_SDK_DOCS_ROOT)
 # ---------------------------------------------------------------------------
 
@@ -525,10 +645,20 @@ async def _ensure_index(device: str, os_type: str, version: str, rt: bool, sourc
                         r.raise_for_status()
                         raw = r.text
             else:
-                # Check local docs root first (staging/internal server mode)
+                # Resolution order for software-dl source:
+                #   1. Local disk root (TI_SDK_DOCS_LOCAL_ROOT)
+                #   2. HTTP root (TI_SDK_DOCS_HTTP_ROOT — nginx autoindex on swubn04)
+                #   3. software-dl.ti.com / github HTTP
                 local_path = _resolve_local_docs(device, os_type, version) if source == "software-dl" else None
+                http_base = (await _resolve_http_docs(device, os_type, version)) if (source == "software-dl" and local_path is None) else None
                 if local_path is not None:
                     raw = (local_path / "searchindex.js").read_text(encoding="utf-8")
+                elif http_base is not None:
+                    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                        async with _http_semaphore():
+                            r = await client.get(f"{http_base}/searchindex.js")
+                        r.raise_for_status()
+                        raw = r.text
                 else:
                     base_url = _make_url(device, os_type, version, rt, source)
                     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
@@ -602,10 +732,11 @@ async def _fetch_page(path: str, device: str, os_type: str, version: str, rt: bo
         text = _read_local_file(path, _LEGACY_ROOT)
     elif not legacy and source == "software-dl":
         local_path = _resolve_local_docs(device, os_type, version)
+        http_base = (await _resolve_http_docs(device, os_type, version)) if local_path is None else None
         if local_path is not None:
             text = _read_local_file(path, local_path)
         else:
-            base_url = _make_url(device, os_type, version, rt, source)
+            base_url = http_base if http_base is not None else _make_url(device, os_type, version, rt, source)
             try:
                 async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
                     async with _http_semaphore():
