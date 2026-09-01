@@ -1,0 +1,154 @@
+# TI Processor SDK Target Platform Profile
+# ==========================================
+# Copy this file to target-platform/<board-name>.yaml and fill in your values.
+# Skills read this file at runtime for board, SDK, toolchain, and document context.
+#
+# Field markers:
+#   <REQUIRED>  — must be filled before invoking any skill
+#   <DERIVED>   — auto-filled by ti-sdk-init skill; do not hand-edit
+#   ""          — optional; leave empty to use skill defaults
+
+# ─── Board ──────────────────────────────────────────────────────────────────────
+board:
+  # Human-readable board name (used in commit messages and logs)
+  name: "<REQUIRED>"                  # e.g. "SK-AM62x", "BeaglePlay", "AM64x-EVM"
+
+  # Yocto MACHINE string — must match exactly what oe-layersetup uses
+  machine: "<REQUIRED>"              # e.g. "am62xx-evm", "am64xx-evm", "beagleplay"
+
+  # SoC identifier (lowercase, no spaces)
+  soc: "<REQUIRED>"                  # e.g. "am625", "am642", "am654"
+
+  # SoC family — used to select the correct TRM and errata documents
+  soc_family: "<REQUIRED>"           # e.g. "am62x", "am64x", "am65x", "j784s4"
+
+  # Security mode burned into the SoC OTP
+  security_mode: "hs-fs"             # gp | hs-fs | hs-se
+  # WARNING: hs-se requires signed boot binaries.
+  # NEVER mix boot binaries (tiboot3.bin/tispl.bin) across security modes.
+
+  # Primary boot medium
+  boot_medium: "sd"                  # sd | emmc | ospi | hyperflash | uart
+
+  # Board hardware revision (from silkscreen)
+  revision: ""                       # e.g. "E3", "rev-B"
+
+# ─── SDK ────────────────────────────────────────────────────────────────────────
+sdk:
+  # Full SDK release string — must match the directory name exactly
+  version: "<REQUIRED>"              # e.g. "12.01.00.05.03"
+
+  # Absolute path to the installed SDK root directory
+  root_path: "<REQUIRED>"            # e.g. "/opt/ti/ti-processor-sdk-linux-am62xx-evm-12.01.00.05.03"
+
+  # Linux kernel version shipped with this SDK
+  kernel_version: "<DERIVED>"        # auto-filled from sdk.root_path/board-support/linux-*/
+
+  # U-Boot version shipped with this SDK
+  uboot_version: "<DERIVED>"
+
+  # Yocto release codename
+  yocto_codename: ""                 # kirkstone | scarthgap | nanbield
+
+  # Yocto MACHINE string for builds (usually same as board.machine)
+  yocto_machine: ""
+
+# ─── Source ─────────────────────────────────────────────────────────────────────
+source:
+  # Workspace root for all source checkouts and builds.
+  # Defaults to <workspace>/Source. Override with absolute path only when needed.
+  root_path: ""
+
+  # Path to your oe-layersetup workspace (the directory containing oe-init-build-env)
+  yocto_workspace: ""                # e.g. "/home/user/oe-layersetup"
+
+  # Path to your custom Yocto layer (if any)
+  custom_layer: ""                   # e.g. "/home/user/meta-my-company"
+
+  # Custom kernel fork (leave empty to use SDK-provided kernel)
+  kernel_repo:
+    url: ""                          # git remote URL
+    branch: ""                       # branch/tag/sha to use
+    path: ""                         # local clone path (default: <root_path>/kernel/)
+
+  # Custom U-Boot fork (leave empty to use SDK-provided U-Boot)
+  uboot_repo:
+    url: ""
+    branch: ""
+    path: ""
+
+# ─── Toolchain ──────────────────────────────────────────────────────────────────
+toolchain:
+  # Absolute path to the cross-compilation toolchain root
+  # Skills call `source <sdk.root_path>/linux-devkit/environment-setup*` if this is empty
+  path: ""                           # e.g. "/opt/ti/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu"
+
+  # Cross-compile prefix
+  prefix: "aarch64-none-linux-gnu-"
+
+# ─── Target Hardware ────────────────────────────────────────────────────────────
+target:
+  # IP address of the target board (used for SSH-based skills and MCP target tools)
+  ip: ""                             # e.g. "192.168.1.100"
+
+  # Serial console device on the host
+  console_port: "/dev/ttyUSB0"
+
+  # Serial console baud rate
+  console_baud: 115200
+
+  # SSH username on the target
+  ssh_user: "root"
+
+# ─── Documents ──────────────────────────────────────────────────────────────────
+# Skills resolve document paths as: <documents.root_path>/<field> when <field>
+# is a relative path; absolute paths are used as-is.
+#
+# To register your documents, run /ti-sdk-link-docs (or fill these manually).
+# All documents are optional but dramatically improve skill accuracy.
+documents:
+  # Base directory for all documents. Defaults to <workspace>/Documents.
+  root_path: ""                      # e.g. "/home/user/ti-docs"
+
+  # Technical Reference Manual — the primary register-level reference
+  # AM62x: SPRUIV7, AM64x: SPRUIM2, AM65x: SPRUIL2, J784S4: SPRUIK4
+  trm: ""                            # e.g. "SPRUIV7A.pdf"
+
+  # SoC Datasheet — pinout tables, electrical specs
+  # AM625: SPPSD17, AM642: SPRS998, AM654: SPRUID5
+  datasheet: ""                      # e.g. "am625.pdf"
+
+  # Board schematic (PDF) — net names, connector pinouts
+  board_schematic: ""                # e.g. "SK-AM62x-Schematic_RevE3.pdf"
+
+  # Board user guide / hardware design guide
+  board_user_guide: ""               # e.g. "SPRUI45.pdf"
+
+  # SysConfig exported pin assignment CSV
+  # Generated from: SysConfig → File → Export → CSV
+  sysconfig_pinout_csv: ""           # e.g. "am625-pinout.csv"
+
+  # SysConfig project file (.syscfg)
+  sysconfig_project: ""             # e.g. "board-design.syscfg"
+
+  # Silicon errata document
+  errata: ""                         # e.g. "am625-errata.pdf"
+
+  # SDK overview HTML (local copy or URL)
+  sdk_overview_html: ""
+
+  # App note: Processor SDK Linux Getting Started Guide
+  getting_started: ""               # e.g. "SPRUIG8.pdf" or URL
+
+  # App note: Processor SDK Linux Software Manifest
+  software_manifest: ""
+
+  # Custom carrier extensions (if building a custom board)
+  custom_carrier_schematic: ""
+  custom_carrier_pinout_csv: ""
+
+# ─── Active ─────────────────────────────────────────────────────────────────────
+# Set to true for the profile that skills should use by default.
+# Only one profile in target-platform/ should have active: true at a time.
+# Switch with /ti-sdk-set-target.
+active: false

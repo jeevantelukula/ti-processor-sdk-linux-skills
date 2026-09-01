@@ -1,0 +1,62 @@
+[
+  {
+    "id": "ti-gpio-pinmux-001",
+    "question": "I want to use physical pin 11 on the SK-AM62x RPi expansion header as a GPIO output, default low. How do I configure it?",
+    "expected_skill": "ti-gpio-pinmux",
+    "expected_script": "decode-iopad.py",
+    "ground_truth": "RPi header pin 11 maps to SoC ball W25, PADCONFIG offset 0x0194 in main_pmx0. The DTS node under &main_pmx0 should be: AM625_IOPAD(0x0194, PIN_OUTPUT | MUX_MODE7). MUX_MODE7 selects GPIO function (GPIO0_51). PIN_OUTPUT sets no RXACTIVE (correct for output). Verify with: gpioinfo gpiochip0 | grep 51, then gpioset gpiochip0 51=0.",
+    "expected_behavior": [
+      "Read skills/02-gpio-pinmux/SKILL.md",
+      "Look up RPi header pin 11 in references/hardware/sk-am62x-connectors.yaml",
+      "Identify SoC ball W25, PADCONFIG offset 0x0194, linux_gpio GPIO0_51",
+      "Run or reference decode-iopad.py to decode existing pad state",
+      "Write AM625_IOPAD(0x0194, PIN_OUTPUT | MUX_MODE7) in &main_pmx0 block",
+      "Provide gpioset command: gpioset gpiochip0 51=0",
+      "Warn that gpiochip number is dynamic — use gpiodetect to confirm"
+    ]
+  },
+  {
+    "id": "ti-gpio-pinmux-002",
+    "question": "I configured a GPIO input on AM625 but gpioget always returns 0 even though the pin is pulled high. What's wrong?",
+    "expected_skill": "ti-gpio-pinmux",
+    "expected_script": "decode-iopad.py",
+    "ground_truth": "The PADCONFIG RXACTIVE bit (bit 18) is not set. Without RXACTIVE, the input receiver is disabled and the pad reads 0 regardless of the actual signal. The DTS node must use PIN_INPUT (not PIN_OUTPUT) in the AM625_IOPAD macro. Change AM625_IOPAD(offset, PIN_OUTPUT | MUX_MODE7) to AM625_IOPAD(offset, PIN_INPUT | MUX_MODE7). This is the most common GPIO bug on TI K3 platforms.",
+    "expected_behavior": [
+      "Read skills/02-gpio-pinmux/SKILL.md — identify the RXACTIVE section",
+      "Identify that PIN_INPUT sets RXACTIVE (bit 18), PIN_OUTPUT does not",
+      "Reference context/device-tree-system.md for AM625_IOPAD macro explanation",
+      "Instruct user to change PIN_OUTPUT to PIN_INPUT in the DTS node",
+      "Explain: recompile DTS, copy dtb to /boot, reboot, retest",
+      "Optionally: run decode-iopad.py on the current register value to confirm RXACTIVE=0"
+    ]
+  },
+  {
+    "id": "ti-gpio-pinmux-003",
+    "question": "I need to configure a PRU-ICSS output pin on AM625. How do I set up GPIO0_30 for direct PRU control instead of Linux GPIO?",
+    "expected_skill": "ti-gpio-pinmux",
+    "expected_script": "gpio-test.sh",
+    "ground_truth": "GPIO0_30 corresponds to ball R14, PADCONFIG offset 0x00d0 in main_pmx0. For PRU direct output, set mux mode to PRG0_PRU0_GPO0 (check TRM for the correct mux mode number — typically mode 2 or 3 for PRU function). The DTS node is: AM625_IOPAD(0x00d0, PIN_OUTPUT | MUX_MODE2) (verify mode number in TRM §GPIO). PRU accesses this via R30 register directly — not through Linux GPIO subsystem. The pad should NOT be claimed by Linux GPIO driver when using PRU direct output.",
+    "expected_behavior": [
+      "Read skills/02-gpio-pinmux/SKILL.md and skills/11-pru-programming/SKILL.md",
+      "Look up GPIO0_30 in references/hardware/am625-pinmux-registers.yaml — offset 0x00d0, ball R14",
+      "Identify that PRU-ICSS pads have a PRU mux mode (not MUX_MODE7)",
+      "Write AM625_IOPAD(0x00d0, PIN_OUTPUT | MUX_MODE<n>) where <n> is PRG0_PRU0_GPO0 mux mode",
+      "Explain R30 register write in PRU firmware for fast sub-microsecond toggle",
+      "Warn: do not use MUX_MODE7 (GPIO) if PRU direct R30 access is desired"
+    ]
+  },
+  {
+    "id": "ti-gpio-pinmux-004",
+    "question": "I changed the DTS pad config but gpioinfo still shows the old function. How do I apply the change?",
+    "expected_skill": "ti-gpio-pinmux",
+    "expected_script": null,
+    "ground_truth": "Device tree changes require recompiling the DTS to DTB and rebooting. Steps: 1) Compile: dtc -I dts -O dtb -o board.dtb board.dts (or run make in the kernel source with ARCH=arm64). 2) Copy new DTB to /boot/dtbs/<kernel-version>/ti/ on the target. 3) Reboot. 4) Verify with gpioinfo after reboot. Runtime DT overlay changes via configfs do not require reboot but apply only until next reboot unless added to extlinux.conf.",
+    "expected_behavior": [
+      "Read skills/02-gpio-pinmux/SKILL.md and skills/03-device-tree-overlay/SKILL.md",
+      "Explain DTS recompile step with dtc or kernel make",
+      "Explain DTB copy to /boot/dtbs/<kernel-version>/ti/",
+      "Explain reboot requirement for compiled-in DT changes",
+      "Offer alternative: DT overlay via configfs for runtime apply (no reboot)"
+    ]
+  }
+]
