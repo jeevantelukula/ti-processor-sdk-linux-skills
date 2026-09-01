@@ -460,7 +460,11 @@ async def _http_list_dir(url: str) -> list[str]:
 
 
 async def _http_latest_build(root: str, device_evm: str, os_type: str) -> str | None:
-    """Return URL of latest (highest build ID) docs dir for device+os, or None."""
+    """Return URL of latest (highest build ID) docs dir for device+os, or None.
+
+    Iterates builds from highest to lowest build ID until one containing the
+    requested OS docs is found (not all builds produce all OS variants).
+    """
     entries = await _http_list_dir(f"{root}/{device_evm}")
     os_docs_name = _local_os_docs_dir(os_type)
     candidates: list[tuple[int, str]] = []
@@ -473,17 +477,17 @@ async def _http_latest_build(root: str, device_evm: str, os_type: str) -> str | 
         candidates.append((build_id, name))
     if not candidates:
         return None
-    _, best_build = max(candidates, key=lambda x: x[0])
-    url = f"{root}/{device_evm}/{best_build}/{os_docs_name}"
-    # Verify searchindex.js exists at this path
-    try:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-            async with _http_semaphore():
-                r = await client.head(f"{url}/searchindex.js")
-            if r.status_code == 200:
-                return url
-    except httpx.RequestError:
-        pass
+    # Check from newest to oldest — each build may only contain a subset of OS variants
+    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+        for _, build_name in sorted(candidates, reverse=True):
+            url = f"{root}/{device_evm}/{build_name}/{os_docs_name}"
+            try:
+                async with _http_semaphore():
+                    r = await client.head(f"{url}/searchindex.js")
+                if r.status_code == 200:
+                    return url
+            except httpx.RequestError:
+                continue
     return None
 
 
