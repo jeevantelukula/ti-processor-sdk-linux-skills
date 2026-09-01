@@ -491,30 +491,59 @@ async def _http_latest_build(root: str, device_evm: str, os_type: str) -> str | 
     return None
 
 
+# Cache resolved HTTP docs URLs to avoid repeated HEAD scans per tool call.
+# Key: (device, os_type, version). Value: resolved URL str or None (not found).
+# Invalidated only on server restart — acceptable since "latest" advances daily
+# and new sessions always get fresh resolution.
+_HTTP_DOCS_CACHE: dict[tuple, str | None] = {}
+_HTTP_DOCS_CACHE_LOCK: asyncio.Lock | None = None
+
+
+def _http_docs_cache_lock() -> asyncio.Lock:
+    global _HTTP_DOCS_CACHE_LOCK
+    if _HTTP_DOCS_CACHE_LOCK is None:
+        _HTTP_DOCS_CACHE_LOCK = asyncio.Lock()
+    return _HTTP_DOCS_CACHE_LOCK
+
+
 async def _resolve_http_docs(device: str, os_type: str, version: str) -> str | None:
-    """Resolve HTTP docs base URL for (device, os_type, version). None if unavailable."""
+    """Resolve HTTP docs base URL for (device, os_type, version). None if unavailable.
+
+    Result is cached for the server lifetime to avoid repeated HEAD scans on every
+    tool call (3+ HEAD requests per call for newest-first build discovery).
+    """
     if _HTTP_DOCS_ROOT is None:
         return None
-    device_evm = _local_device_dir(device)   # AM62XX -> am62xx-evm
-    os_docs_name = _local_os_docs_dir(os_type)
-    if version == "latest":
-        return await _http_latest_build(_HTTP_DOCS_ROOT, device_evm, os_type)
-    # Specific version: find build dir containing version as substring
-    entries = await _http_list_dir(f"{_HTTP_DOCS_ROOT}/{device_evm}")
-    for entry in sorted(entries):
-        name = entry.rstrip("/")
-        if version not in name:
-            continue
-        url = f"{_HTTP_DOCS_ROOT}/{device_evm}/{name}/{os_docs_name}"
-        try:
-            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-                async with _http_semaphore():
-                    r = await client.head(f"{url}/searchindex.js")
-                if r.status_code == 200:
-                    return url
-        except httpx.RequestError:
-            pass
-    return None
+    cache_key = (device, os_type, version)
+    if cache_key in _HTTP_DOCS_CACHE:
+        return _HTTP_DOCS_CACHE[cache_key]
+    async with _http_docs_cache_lock():
+        if cache_key in _HTTP_DOCS_CACHE:
+            return _HTTP_DOCS_CACHE[cache_key]
+        device_evm = _local_device_dir(device)   # AM62XX -> am62xx-evm
+        os_docs_name = _local_os_docs_dir(os_type)
+        if version == "latest":
+            url = await _http_latest_build(_HTTP_DOCS_ROOT, device_evm, os_type)
+        else:
+            # Specific version: find build dir containing version as substring
+            url = None
+            entries = await _http_list_dir(f"{_HTTP_DOCS_ROOT}/{device_evm}")
+            for entry in sorted(entries):
+                name = entry.rstrip("/")
+                if version not in name:
+                    continue
+                candidate = f"{_HTTP_DOCS_ROOT}/{device_evm}/{name}/{os_docs_name}"
+                try:
+                    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                        async with _http_semaphore():
+                            r = await client.head(f"{candidate}/searchindex.js")
+                        if r.status_code == 200:
+                            url = candidate
+                            break
+                except httpx.RequestError:
+                    pass
+        _HTTP_DOCS_CACHE[cache_key] = url
+        return url
 
 
 async def _catalog_from_http_root(root: str) -> list[dict[str, str]]:
