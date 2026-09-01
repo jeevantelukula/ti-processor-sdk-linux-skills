@@ -219,6 +219,7 @@ ti_sdk_docs_read(
 | `TI_SDK_MAX_INDEXES` | `50` | Max variants held in memory. Oldest evicted when exceeded |
 | `TI_SDK_MAX_CONCURRENT_FETCHES` | `10` | Max simultaneous HTTP fetches. Prevents FD exhaustion under load |
 | `TI_SDK_MAX_PAGES_PER_VARIANT` | `200` | Max pages cached per variant. Older pages evicted when exceeded |
+| `TI_SDK_DOCS_LOCAL_ROOT` | — | Staging/internal mode: path to nightly build root. Structure: `{root}/{device}-evm/{build_id}_{date}/processor-sdk-{os}-docs/`. Reads docs from disk, no HTTP. "latest" = highest build ID |
 | `GITHUB_TOKEN` | — | GitHub PAT. Raises catalog API rate limit from 60 to 5000 req/hr |
 | `TI_SDK_DOCS_URL` | — | Legacy: lock to single base URL (must be *.ti.com or texasinstruments.github.io) |
 | `TI_SDK_DOCS_ROOT` | — | Legacy: lock to local filesystem path |

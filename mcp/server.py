@@ -34,6 +34,9 @@ TI_SDK_MAX_INDEXES              max variants in memory before LRU eviction (defa
 TI_SDK_MAX_CONCURRENT_FETCHES  max simultaneous HTTP fetches (default: 10)
 TI_SDK_MAX_PAGES_PER_VARIANT   max cached pages per variant before LRU eviction (default: 200)
 GITHUB_TOKEN                   GitHub PAT for API auth (60/hr → 5000/hr; avoids rate limits)
+TI_SDK_DOCS_LOCAL_ROOT         local nightly build root for staging/internal server mode
+                               structure: {root}/{device}-evm/{build_id}_{date}/processor-sdk-{os}-docs/
+                               "latest" resolves to highest build ID for each device+OS
 
 Legacy single-variant (backward compat):
 TI_SDK_DOCS_URL         base URL  — locks tools to this URL only
@@ -246,9 +249,14 @@ async def _ensure_catalog() -> list[dict[str, str]]:
         now = time.monotonic()
         if _CATALOG is not None and (now - _CATALOG_LOADED_AT) < _CATALOG_TTL:
             return _CATALOG
-        if _LOCAL_CONFIGS is not None:
+        if _LOCAL_DOCS_ROOT is not None:
+            # Nightly build root (swubn04-style): scan {device}-evm/{build}/processor-sdk-{os}-docs/
+            _CATALOG = _catalog_from_local_root(_LOCAL_DOCS_ROOT)
+            sys.stderr.write(f"Catalog: {len(_CATALOG)} variants (local root {_LOCAL_DOCS_ROOT})\n")
+        elif _LOCAL_CONFIGS is not None:
+            # processor-sdk-doc configs/ dir (processor-sdk-doc repo clone)
             _CATALOG = _catalog_from_local(_LOCAL_CONFIGS)
-            sys.stderr.write(f"Catalog: {len(_CATALOG)} variants (local {_LOCAL_CONFIGS})\n")
+            sys.stderr.write(f"Catalog: {len(_CATALOG)} variants (local configs {_LOCAL_CONFIGS})\n")
         else:
             _CATALOG = await _catalog_from_github()
             sys.stderr.write(f"Catalog: {len(_CATALOG)} variants (GitHub)\n")
@@ -310,6 +318,101 @@ def _make_url(device: str, os_type: str, version: str, rt: bool, source: str) ->
     if source == "github":
         return _github_pages_url(device, os_type)
     return _software_dl_url(device, os_type, version, rt)
+
+
+# ---------------------------------------------------------------------------
+# Local docs root — multi-variant disk read (staging / internal server mode)
+#
+# Set TI_SDK_DOCS_LOCAL_ROOT to the nightly build root, e.g.:
+#   /datalocal/nightly_builds/nightly/smpusdk-docs-build/
+#
+# Expected directory structure:
+#   {root}/{device}-evm/{build_id}_{date}/processor-sdk-{os}-docs/searchindex.js
+#
+# "latest" resolves to the build with the highest numeric build ID.
+# Specific version strings are matched as substrings of the build dir name.
+# ---------------------------------------------------------------------------
+
+_LOCAL_DOCS_ROOT: Path | None = (
+    Path(_os.environ["TI_SDK_DOCS_LOCAL_ROOT"])
+    if "TI_SDK_DOCS_LOCAL_ROOT" in _os.environ else None
+)
+
+
+def _local_device_dir(device: str) -> str:
+    """AM62XX -> am62xx-evm"""
+    return device.lower() + "-evm"
+
+
+def _local_os_docs_dir(os_type: str) -> str:
+    """linux -> processor-sdk-linux-docs"""
+    return f"processor-sdk-{os_type}-docs"
+
+
+def _local_latest_docs(device_path: Path, os_type: str) -> Path | None:
+    """Return path to latest build's docs dir for given OS (highest build ID), or None."""
+    os_docs_name = _local_os_docs_dir(os_type)
+    candidates: list[tuple[int, Path]] = []
+    try:
+        for build_dir in device_path.iterdir():
+            if not build_dir.is_dir():
+                continue
+            docs_path = build_dir / os_docs_name
+            if not (docs_path / "searchindex.js").exists():
+                continue
+            try:
+                build_id = int(build_dir.name.split("_")[0])
+                candidates.append((build_id, docs_path))
+            except (ValueError, IndexError):
+                continue
+    except PermissionError:
+        return None
+    return max(candidates, key=lambda x: x[0])[1] if candidates else None
+
+
+def _local_versioned_docs(device_path: Path, os_type: str, version: str) -> Path | None:
+    """Return docs path for build dir whose name contains version as substring."""
+    os_docs_name = _local_os_docs_dir(os_type)
+    try:
+        for build_dir in sorted(device_path.iterdir()):
+            if version not in build_dir.name:
+                continue
+            docs_path = build_dir / os_docs_name
+            if (docs_path / "searchindex.js").exists():
+                return docs_path
+    except PermissionError:
+        return None
+    return None
+
+
+def _resolve_local_docs(device: str, os_type: str, version: str) -> Path | None:
+    """Resolve local docs Path for (device, os_type, version). Returns None if unavailable."""
+    if _LOCAL_DOCS_ROOT is None:
+        return None
+    device_path = _LOCAL_DOCS_ROOT / _local_device_dir(device)
+    if not device_path.is_dir():
+        return None
+    if version == "latest":
+        return _local_latest_docs(device_path, os_type)
+    return _local_versioned_docs(device_path, os_type, version)
+
+
+def _catalog_from_local_root(root: Path) -> list[dict[str, str]]:
+    """Discover (device, os) combos from nightly build root structure."""
+    result = []
+    known_os = ["linux", "debian", "buildroot", "android", "edgeai"]
+    try:
+        dirs = sorted(root.iterdir())
+    except PermissionError:
+        return result
+    for device_path in dirs:
+        if not device_path.is_dir() or not device_path.name.endswith("-evm"):
+            continue
+        device = device_path.name[:-4].upper()  # am62xx-evm -> AM62XX
+        for os_type in known_os:
+            if _local_latest_docs(device_path, os_type) is not None:
+                result.append({"device": device, "os": os_type})
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -422,12 +525,17 @@ async def _ensure_index(device: str, os_type: str, version: str, rt: bool, sourc
                         r.raise_for_status()
                         raw = r.text
             else:
-                base_url = _make_url(device, os_type, version, rt, source)
-                async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                    async with _http_semaphore():
-                        r = await client.get(f"{base_url}/searchindex.js")
-                    r.raise_for_status()
-                    raw = r.text
+                # Check local docs root first (staging/internal server mode)
+                local_path = _resolve_local_docs(device, os_type, version) if source == "software-dl" else None
+                if local_path is not None:
+                    raw = (local_path / "searchindex.js").read_text(encoding="utf-8")
+                else:
+                    base_url = _make_url(device, os_type, version, rt, source)
+                    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                        async with _http_semaphore():
+                            r = await client.get(f"{base_url}/searchindex.js")
+                        r.raise_for_status()
+                        raw = r.text
 
             idx = _parse_index(raw)
 
@@ -492,6 +600,24 @@ async def _fetch_page(path: str, device: str, os_type: str, version: str, rt: bo
 
     if legacy and _LEGACY_ROOT is not None:
         text = _read_local_file(path, _LEGACY_ROOT)
+    elif not legacy and source == "software-dl":
+        local_path = _resolve_local_docs(device, os_type, version)
+        if local_path is not None:
+            text = _read_local_file(path, local_path)
+        else:
+            base_url = _make_url(device, os_type, version, rt, source)
+            try:
+                async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                    async with _http_semaphore():
+                        r = await client.get(f"{base_url}/{path}")
+                    if r.status_code == 404:
+                        return f"Page not found: {path}\nUse ti_sdk_docs_search to find valid paths."
+                    r.raise_for_status()
+                    text = _html_to_text(r.text, path)
+            except httpx.HTTPStatusError as exc:
+                return f"HTTP {exc.response.status_code} error fetching {path}: {exc.response.reason_phrase}"
+            except httpx.RequestError as exc:
+                return f"Network error fetching {path}: {exc}"
     else:
         base_url = _LEGACY_URL if (legacy and _LEGACY_URL) else _make_url(device, os_type, version, rt, source)
         try:
