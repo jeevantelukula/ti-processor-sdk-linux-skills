@@ -216,6 +216,7 @@ ti_processor_sdk_docs_read(
 | `TI_PROCESSOR_SDK_MCP_PORT` | `7471` | HTTP server port |
 | `TI_PROCESSOR_SDK_DOC_CONFIGS` | (auto) | Path to processor-sdk-doc `configs/` dir. Auto-detected from adjacent repo; falls back to GitHub API |
 | `TI_PROCESSOR_SDK_CATALOG_TTL` | `86400` | Seconds before catalog is re-fetched (24h default) |
+| `TI_PROCESSOR_SDK_OS_PATTERNS` | — | Add or override OS URL patterns without editing server.py. Format: `os:prefix:version_suffix:latest_dir` comma-separated. Example: `rtos:processor-sdk-rtos::latest` |
 | `TI_PROCESSOR_SDK_MAX_INDEXES` | `50` | Max variants held in memory. Oldest evicted when exceeded |
 | `TI_PROCESSOR_SDK_MAX_CONCURRENT_FETCHES` | `10` | Max simultaneous HTTP fetches |
 | `TI_PROCESSOR_SDK_MAX_PAGES_PER_VARIANT` | `200` | Max pages cached per variant |

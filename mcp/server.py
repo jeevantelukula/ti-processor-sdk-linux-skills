@@ -320,12 +320,34 @@ _OS_LATEST: dict[str, str] = {
     "edgeai":    "latest",
 }
 
+# Allow external OS pattern config without editing server.py.
+# Format: os:prefix:version_suffix:latest_dir  (comma-separated)
+# Example: TI_PROCESSOR_SDK_OS_PATTERNS=rtos:processor-sdk-rtos::latest,newos:processor-sdk-linux:_NewOS:latest_NewOS
+_OS_PATTERNS_ENV = _os.environ.get("TI_PROCESSOR_SDK_OS_PATTERNS", "")
+if _OS_PATTERNS_ENV:
+    for _entry in _OS_PATTERNS_ENV.split(","):
+        _entry = _entry.strip()
+        if not _entry:
+            continue
+        _parts = _entry.split(":")
+        if len(_parts) != 4:
+            sys.stderr.write(
+                f"Warning: TI_PROCESSOR_SDK_OS_PATTERNS entry {_entry!r} invalid -- "
+                "expected os:prefix:version_suffix:latest_dir, skipping.\n"
+            )
+            continue
+        _os_name, _prefix, _suffix, _latest = _parts
+        _OS_PREFIX[_os_name] = _prefix
+        _OS_SUFFIX[_os_name] = _suffix
+        _OS_LATEST[_os_name] = _latest
+        sys.stderr.write(f"OS pattern override: {_os_name} -> prefix={_prefix!r} suffix={_suffix!r} latest={_latest!r}\n")
+
 
 def _software_dl_url(device: str, os_type: str, version: str, rt: bool) -> str:
     if os_type not in _OS_PREFIX:
         sys.stderr.write(
             f"Warning: unknown OS type '{os_type}' -- falling back to processor-sdk-linux. "
-            f"Add '{os_type}' to _OS_PREFIX/_OS_SUFFIX/_OS_LATEST in server.py.\n"
+            f"Set TI_PROCESSOR_SDK_OS_PATTERNS to add '{os_type}' without editing server.py.\n"
         )
     base_prefix = _OS_PREFIX.get(os_type, "processor-sdk-linux")
     if rt and os_type == "linux":
