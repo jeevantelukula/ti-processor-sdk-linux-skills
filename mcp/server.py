@@ -144,12 +144,13 @@ _CATALOG_LOADED_AT: float = 0.0
 _CATALOG_TTL: int = int(_os.environ.get("TI_PROCESSOR_SDK_CATALOG_TTL", "86400"))
 _GITHUB_TOKEN: str = _os.environ.get("GITHUB_TOKEN", "")
 
-_env_configs = _os.environ.get("TI_PROCESSOR_SDK_DOC_CONFIGS", "")
-if _env_configs:
-    _LOCAL_CONFIGS: Path | None = Path(_env_configs)
-else:
-    _adj = Path(__file__).parent.parent.parent / "processor-sdk-doc" / "configs"
-    _LOCAL_CONFIGS = _adj if _adj.is_dir() else None
+def _find_local_configs() -> Path | None:
+    if cfg := _os.environ.get("TI_PROCESSOR_SDK_DOC_CONFIGS"):
+        return Path(cfg)
+    adj = Path(__file__).parent.parent.parent / "processor-sdk-doc" / "configs"
+    return adj if adj.is_dir() else None
+
+_LOCAL_CONFIGS: Path | None = _find_local_configs()
 
 _REQUIRED_FRAGMENTS = {"config.txt", "tags.py", "toc.txt"}
 
@@ -369,9 +370,11 @@ def _resolve_local_docs(device: str, os_type: str, version: str) -> Path | None:
     return _local_versioned_docs(device_path, os_type, version)
 
 
+_KNOWN_OS_TYPES = ["linux", "debian", "buildroot", "android", "edgeai"]
+
+
 def _catalog_from_local_root(root: Path) -> list[dict[str, str]]:
     """Discover (device, os) combos from nightly build root structure."""
-    known_os = ["linux", "debian", "buildroot", "android", "edgeai"]
     result = []
     try:
         dirs = sorted(root.iterdir())
@@ -381,7 +384,7 @@ def _catalog_from_local_root(root: Path) -> list[dict[str, str]]:
         if not device_path.is_dir() or not device_path.name.endswith("-evm"):
             continue
         device = device_path.name[:-4].upper()
-        for os_type in known_os:
+        for os_type in _KNOWN_OS_TYPES:
             if _local_latest_docs(device_path, os_type) is not None:
                 result.append({"device": device, "os": os_type})
     return result
@@ -478,11 +481,11 @@ async def _resolve_http_docs(device: str, os_type: str, version: str) -> str | N
         if cache_key in _HTTP_DOCS_CACHE:
             return _HTTP_DOCS_CACHE[cache_key]
         device_evm = _local_device_dir(device)
-        os_docs_name = _local_os_docs_dir(os_type)
         if version == "latest":
             url = await _http_latest_build(_HTTP_DOCS_ROOT, device_evm, os_type)
         else:
             url = None
+            os_docs_name = _local_os_docs_dir(os_type)
             entries = await _http_list_dir(f"{_HTTP_DOCS_ROOT}/{device_evm}")
             for entry in sorted(entries):
                 name = entry.rstrip("/")
@@ -504,7 +507,6 @@ async def _resolve_http_docs(device: str, os_type: str, version: str) -> str | N
 
 async def _catalog_from_http_root(root: str) -> list[dict[str, str]]:
     """Discover (device, os) combos by parsing autoindex at root URL."""
-    known_os = ["linux", "debian", "buildroot", "android", "edgeai"]
     device_entries = await _http_list_dir(root)
     device_entries = [e.rstrip("/") for e in device_entries if e.rstrip("/").endswith("-evm")]
 
@@ -514,7 +516,7 @@ async def _catalog_from_http_root(root: str) -> list[dict[str, str]]:
         return {"device": device, "os": os_type} if url else None
 
     found = await asyncio.gather(*[
-        _probe(d, o) for d in device_entries for o in known_os
+        _probe(d, o) for d in device_entries for o in _KNOWN_OS_TYPES
     ])
     return [f for f in found if f is not None]
 
@@ -585,6 +587,14 @@ def _is_legacy_mode() -> bool:
 # Index parsing and lazy loading
 # ---------------------------------------------------------------------------
 
+async def _fetch_index_raw(base_url: str) -> str:
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        async with _http_semaphore():
+            r = await client.get(f"{base_url}/searchindex.js")
+        r.raise_for_status()
+        return r.text
+
+
 def _parse_index(raw: str) -> dict[str, Any]:
     raw = re.sub(r"^Search\.setIndex\(", "", raw)
     raw = raw.rstrip().rstrip(")")
@@ -617,11 +627,7 @@ async def _ensure_index(
                 if _LEGACY_ROOT is not None:
                     raw = (_LEGACY_ROOT / "searchindex.js").read_text(encoding="utf-8")
                 else:
-                    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                        async with _http_semaphore():
-                            r = await client.get(f"{_LEGACY_URL}/searchindex.js")
-                        r.raise_for_status()
-                        raw = r.text
+                    raw = await _fetch_index_raw(_LEGACY_URL)
             else:
                 local_path = (
                     _resolve_local_docs(device, os_type, version)
@@ -634,18 +640,9 @@ async def _ensure_index(
                 if local_path is not None:
                     raw = (local_path / "searchindex.js").read_text(encoding="utf-8")
                 elif http_base is not None:
-                    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                        async with _http_semaphore():
-                            r = await client.get(f"{http_base}/searchindex.js")
-                        r.raise_for_status()
-                        raw = r.text
+                    raw = await _fetch_index_raw(http_base)
                 else:
-                    base_url = _make_url(device, os_type, version, rt, source)
-                    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                        async with _http_semaphore():
-                            r = await client.get(f"{base_url}/searchindex.js")
-                        r.raise_for_status()
-                        raw = r.text
+                    raw = await _fetch_index_raw(_make_url(device, os_type, version, rt, source))
 
             idx = _parse_index(raw)
 
@@ -708,7 +705,7 @@ async def _fetch_http(base_url: str, path: str) -> str:
                     "Use ti_processor_sdk_docs_search to find valid paths."
                 )
             r.raise_for_status()
-            return _html_to_text(r.text, path)
+            return _html_to_text(r.text)
     except httpx.HTTPStatusError as exc:
         return f"HTTP {exc.response.status_code} error fetching {path}: {exc.response.reason_phrase}"
     except httpx.RequestError as exc:
@@ -754,14 +751,14 @@ def _read_local_file(path: str, root: Path) -> str:
             f"Page not found: {path}\n"
             "Use ti_processor_sdk_docs_search to find valid paths."
         )
-    return _html_to_text(full.read_text(encoding="utf-8", errors="replace"), path)
+    return _html_to_text(full.read_text(encoding="utf-8", errors="replace"))
 
 
 # ---------------------------------------------------------------------------
 # HTML -> clean text
 # ---------------------------------------------------------------------------
 
-def _html_to_text(html: str, path: str) -> str:
+def _html_to_text(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
     for sel in (
         "nav", ".wy-nav-side", ".wy-nav-top", ".wy-breadcrumbs",
