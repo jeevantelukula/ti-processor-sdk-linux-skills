@@ -44,6 +44,7 @@ TI_PROCESSOR_SDK_DOCS_ROOT              local path -- locks tools to this path
 import argparse
 import asyncio
 import json
+import math
 import os as _os
 import re
 import sys
@@ -242,6 +243,55 @@ async def _ensure_catalog() -> list[dict[str, str]]:
             sys.stderr.write(f"Catalog: {len(_CATALOG)} variants (GitHub)\n")
         _CATALOG_LOADED_AT = time.monotonic()
         return _CATALOG
+
+
+# ---------------------------------------------------------------------------
+# Search: TI-specific synonym expansion
+#
+# Maps a query word to additional terms to score alongside it.
+# Covers common driver/subsystem name mismatches between what customers say
+# and what the Sphinx index contains (e.g. "remoteproc" vs "rproc").
+# ---------------------------------------------------------------------------
+
+_TI_SYNONYMS: dict[str, list[str]] = {
+    "gpio":       ["pinctrl", "pinmux", "iopad", "gpiod"],
+    "remoteproc": ["rproc", "m4f", "r5f", "rpmsg", "firmware"],
+    "rproc":      ["remoteproc", "m4f", "r5f", "rpmsg"],
+    "emmc":       ["mmc", "sdmmc"],
+    "ethernet":   ["cpsw", "icssg", "netdev", "phy"],
+    "display":    ["dss", "drm", "tidss", "hdmi", "dpi"],
+    "usb":        ["dwc3", "musb", "cdns3", "otg"],
+    "pcie":       ["pci", "cadence"],
+    "can":        ["mcan", "hecc"],
+    "spi":        ["mcspi", "qspi", "ospi", "spinor"],
+    "i2c":        ["omap", "davinci"],
+    "uart":       ["serial", "tty", "console"],
+    "dma":        ["udma", "pktdma", "bcdma", "edma"],
+    "crypto":     ["sa2ul", "trng", "aes", "sha"],
+    "ipc":        ["rpmsg", "virtio", "mailbox"],
+    "power":      ["cpufreq", "cpuidle", "suspend"],
+    "watchdog":   ["wdt", "rti"],
+    "timer":      ["dmtimer"],
+    "audio":      ["mcasp", "alsa", "asoc"],
+    "camera":     ["csi", "csi2rx", "v4l2"],
+    "boot":       ["uboot", "spl", "tiboot3", "tispl"],
+    "yocto":      ["bitbake", "meta", "recipe", "layer"],
+    "kernel":     ["linux", "kconfig", "defconfig"],
+    "devicetree": ["dts", "dtsi", "dtb", "overlay"],
+    "dt":         ["dts", "dtsi", "dtb", "devicetree", "overlay"],
+}
+
+
+def _expand_terms(words: list[str]) -> list[str]:
+    """Expand query words with TI-specific synonyms. Preserves order, deduplicates."""
+    expanded = list(words)
+    seen = set(words)
+    for w in words:
+        for syn in _TI_SYNONYMS.get(w, []):
+            if syn not in seen:
+                expanded.append(syn)
+                seen.add(syn)
+    return expanded[:_MAX_SEARCH_TERMS]
 
 
 # ---------------------------------------------------------------------------
@@ -916,16 +966,21 @@ async def ti_processor_sdk_docs_search(
     except VariantNotFoundError as exc:
         return str(exc)
 
-    docnames: list[str] = idx["docnames"]
-    titles:   list[str] = idx["titles"]
-    terms:    dict[str, Any] = idx["terms"]
+    docnames:   list[str]      = idx["docnames"]
+    titles:     list[str]      = idx["titles"]
+    terms:      dict[str, Any] = idx["terms"]
+    titleterms: dict[str, Any] = idx.get("titleterms", {})
+    N = len(docnames)
 
-    words = list(dict.fromkeys(re.findall(r"[a-z][a-z0-9]*", query.lower())))[:_MAX_SEARCH_TERMS]
-    if not words:
+    base_words = list(dict.fromkeys(re.findall(r"[a-z][a-z0-9]*", query.lower())))[:_MAX_SEARCH_TERMS]
+    if not base_words:
         return json.dumps([])
+    words = _expand_terms(base_words)
 
-    scores: dict[int, int] = {}
+    scores: dict[int, float] = {}
+
     for word in words:
+        # body terms — IDF-weighted
         hits = terms.get(word)
         if hits is None:
             for stem in (word.rstrip("s"), word.rstrip("ing")):
@@ -934,16 +989,22 @@ async def ti_processor_sdk_docs_search(
                     if hits is not None:
                         break
         if hits is not None:
-            for doc_idx in _doc_indices(hits):
-                scores[doc_idx] = scores.get(doc_idx, 0) + 1
+            doc_list = _doc_indices(hits)
+            idf = math.log((N + 1) / (len(doc_list) + 1)) + 1.0
+            for doc_idx in doc_list:
+                scores[doc_idx] = scores.get(doc_idx, 0.0) + idf
 
-    for doc_idx, title in enumerate(titles):
-        if any(w in title.lower() for w in words):
-            scores[doc_idx] = scores.get(doc_idx, 0) + 3
+        # title terms — IDF-weighted with 3x boost
+        title_hits = titleterms.get(word)
+        if title_hits is not None:
+            doc_list = _doc_indices(title_hits)
+            idf = math.log((N + 1) / (len(doc_list) + 1)) + 1.0
+            for doc_idx in doc_list:
+                scores[doc_idx] = scores.get(doc_idx, 0.0) + idf * 3.0
 
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:max_results]
     return json.dumps([
-        {"title": titles[i], "path": docnames[i] + ".html", "score": s}
+        {"title": titles[i], "path": docnames[i] + ".html", "score": round(s, 3)}
         for i, s in ranked
     ], indent=2)
 
