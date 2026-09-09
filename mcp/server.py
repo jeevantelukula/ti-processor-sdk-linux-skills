@@ -54,13 +54,17 @@ import os as _os
 import re
 import sys
 import time
+
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+import snowballstemmer as _snowball
 from bs4 import BeautifulSoup, NavigableString, Tag
 from mcp.server.fastmcp import FastMCP
+
+_STEMMER = _snowball.stemmer("english")
 
 
 class VariantNotFoundError(Exception):
@@ -815,7 +819,12 @@ async def _fetch_index_raw(base_url: str) -> str:
 def _parse_index(raw: str) -> dict[str, Any]:
     raw = re.sub(r"^Search\.setIndex\(", "", raw)
     raw = raw.rstrip().rstrip(")")
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Older Sphinx versions emit unquoted JS keys — quote them before parsing.
+        raw = re.sub(r'([{,])\s*([A-Za-z_][A-Za-z0-9_]*)\s*:', r'\1"\2":', raw)
+        return json.loads(raw)
 
 
 async def _ensure_index(
@@ -1178,22 +1187,19 @@ async def ti_processor_sdk_docs_search(
     scores: dict[int, float] = {}
 
     for word in words:
-        # body terms — IDF-weighted
-        hits = terms.get(word)
-        if hits is None:
-            for stem in (word.rstrip("s"), word.rstrip("ing")):
-                if stem != word:
-                    hits = terms.get(stem)
-                    if hits is not None:
-                        break
+        stemmed = _STEMMER.stemWord(word)
+
+        # body terms — IDF-weighted; try raw then stemmed
+        hits = terms.get(word) if terms.get(word) is not None else terms.get(stemmed)
         if hits is not None:
             doc_list = _doc_indices(hits)
             idf = math.log((N + 1) / (len(doc_list) + 1)) + 1.0
             for doc_idx in doc_list:
                 scores[doc_idx] = scores.get(doc_idx, 0.0) + idf
 
-        # title terms — IDF-weighted with 3x boost
-        title_hits = titleterms.get(word)
+        # title terms — IDF-weighted with 3x boost; try raw then stemmed
+        title_hits = (titleterms.get(word) if titleterms.get(word) is not None
+                      else titleterms.get(stemmed))
         if title_hits is not None:
             doc_list = _doc_indices(title_hits)
             idf = math.log((N + 1) / (len(doc_list) + 1)) + 1.0
