@@ -3,8 +3,9 @@
 Lets Claude Code (and any MCP-compatible AI agent) search and read
 TI Processor SDK Linux documentation — without loading full HTML pages into context.
 
-Three tools:
+Four tools:
 - **`ti_processor_sdk_docs_list_variants`** — list all supported (device, OS) combos
+- **`ti_processor_sdk_docs_list_versions`** — list available SDK versions for a device (auto-discovered from ti.com)
 - **`ti_processor_sdk_docs_search`** — keyword search → ranked list of relevant pages
 - **`ti_processor_sdk_docs_read`** — read a specific page as clean text (navigation stripped)
 
@@ -133,6 +134,23 @@ Catalog is auto-discovered from processor-sdk-doc `configs/` (local repo if pres
 
 ---
 
+### `ti_processor_sdk_docs_list_versions`
+
+| Parameter | Default | Description |
+|---|---|---|
+| `device` | `AM62X` | Device family — see list_variants for valid values |
+
+Returns JSON with `tool_id` (ti.com download page ID) and `versions` array. Each version has `version` (full underscore form like `12_01_00_05_03`), `short` (dot alias like `12.01`), and `label` (human label with date).
+
+Returns empty `versions` list for devices without a public ti.com download page (e.g. DRA821A, TDA4VM).
+
+**Example:**
+```
+ti_processor_sdk_docs_list_versions(device="AM62X")
+```
+
+---
+
 ### `ti_processor_sdk_docs_search`
 
 | Parameter | Default | Description |
@@ -140,7 +158,7 @@ Catalog is auto-discovered from processor-sdk-doc `configs/` (local repo if pres
 | `query` | required | Keywords or natural language |
 | `device` | `AM62X` | Device family — see list_variants for valid values |
 | `os` | `linux` | `linux`, `debian`, or `buildroot` |
-| `version` | `latest` | `latest` or exact version e.g. `12_01_00_05_03`. Ignored when source=github |
+| `version` | `latest` | `latest`, full version `12_01_00_05_03`, or short alias `12.01`. Ignored when source=github |
 | `rt` | `false` | `true` = use `processor-sdk-linux-rt` URL prefix. Ignored when source=github |
 | `source` | `software-dl` | `software-dl` (versioned) or `github` (latest master) |
 | `max_results` | `8` | Max pages returned (max 20) |
@@ -217,6 +235,7 @@ ti_processor_sdk_docs_read(
 | `TI_PROCESSOR_SDK_DOC_CONFIGS` | (auto) | Path to processor-sdk-doc `configs/` dir. Auto-detected from adjacent repo; falls back to GitHub API |
 | `TI_PROCESSOR_SDK_CATALOG_TTL` | `86400` | Seconds before catalog is re-fetched (24h default) |
 | `TI_PROCESSOR_SDK_OS_PATTERNS` | — | Add or override OS URL patterns without editing server.py. Format: `os:prefix:version_suffix:latest_dir` comma-separated. Example: `rtos:processor-sdk-rtos::latest` |
+| `TI_PROCESSOR_SDK_TOOL_ID_OVERRIDES` | — | Override ti.com download tool ID per device (for restricted/renamed pages). Format: `DEVICE=TOOL_ID` comma-separated. Example: `AM62DX=PROCESSOR-SDK-LINUX-AM62DX` |
 | `TI_PROCESSOR_SDK_MAX_INDEXES` | `50` | Max variants held in memory. Oldest evicted when exceeded |
 | `TI_PROCESSOR_SDK_MAX_CONCURRENT_FETCHES` | `10` | Max simultaneous HTTP fetches |
 | `TI_PROCESSOR_SDK_MAX_PAGES_PER_VARIANT` | `200` | Max pages cached per variant |

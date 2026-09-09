@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """TI Processor SDK Documentation MCP Server.
 
-Three tools:
+Four tools:
   ti_processor_sdk_docs_list_variants  — list all supported (device, OS) combos
+  ti_processor_sdk_docs_list_versions  — list available SDK versions for a device (from ti.com)
   ti_processor_sdk_docs_search         — keyword search scoped to a specific variant
   ti_processor_sdk_docs_read           — read a doc page as clean text
 
@@ -29,6 +30,9 @@ TI_PROCESSOR_SDK_CATALOG_TTL            catalog re-fetch interval in seconds (de
 TI_PROCESSOR_SDK_MAX_INDEXES            max variants in memory before LRU eviction (default: 50)
 TI_PROCESSOR_SDK_MAX_CONCURRENT_FETCHES max simultaneous HTTP fetches (default: 10)
 TI_PROCESSOR_SDK_MAX_PAGES_PER_VARIANT  max cached pages per variant before LRU eviction (default: 200)
+TI_PROCESSOR_SDK_TOOL_ID_OVERRIDES      override ti.com download tool ID per device
+                                        format: DEVICE=TOOL_ID,DEVICE2=TOOL_ID2
+                                        example: AM62DX=PROCESSOR-SDK-LINUX-AM62DX
 TI_PROCESSOR_SDK_DOCS_LOCAL_ROOT        local nightly build root for staging/internal mode
                                         structure: {root}/{device}-evm/{build_id}_{date}/processor-sdk-{os}-docs/
                                         "latest" resolves to highest build ID
@@ -43,6 +47,7 @@ TI_PROCESSOR_SDK_DOCS_ROOT              local path -- locks tools to this path
 
 import argparse
 import asyncio
+import html as _html
 import json
 import math
 import os as _os
@@ -70,6 +75,7 @@ _VALID_SOURCES      = frozenset({"software-dl", "github"})
 _DEVICE_RE          = re.compile(r'^[A-Z][A-Z0-9]{1,19}$')
 _OS_RE              = re.compile(r'^[a-z][a-z0-9]{0,19}$')
 _VERSION_RE         = re.compile(r'^(latest|\d{1,4}(_\d{1,4}){2,5})$')
+_SHORT_VER_RE       = re.compile(r'^\d{1,2}\.\d{1,2}(\.\d{1,4})*$')
 _PATH_SAFE_RE       = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_/.\-]*$')
 _MAX_QUERY_LEN      = 500
 _MAX_PATH_LEN       = 300
@@ -112,10 +118,10 @@ def _validate(
             "(e.g. 'linux', 'debian', 'buildroot'). "
             "Call ti_processor_sdk_docs_list_variants to see valid OS types."
         )
-    if version is not None and not _VERSION_RE.match(version):
+    if version is not None and not (_VERSION_RE.match(version) or _SHORT_VER_RE.match(version)):
         return (
-            f"Invalid version {version!r}: must be 'latest' or a version string "
-            "like '12_01_00_05_03'."
+            f"Invalid version {version!r}: must be 'latest', a full version string "
+            "like '12_01_00_05_03', or a short alias like '12.01'."
         )
     if source is not None and source not in _VALID_SOURCES:
         return f"Invalid source {source!r}: must be 'software-dl' or 'github'."
@@ -341,6 +347,145 @@ if _OS_PATTERNS_ENV:
         _OS_SUFFIX[_os_name] = _suffix
         _OS_LATEST[_os_name] = _latest
         sys.stderr.write(f"OS pattern override: {_os_name} -> prefix={_prefix!r} suffix={_suffix!r} latest={_latest!r}\n")
+
+
+# ---------------------------------------------------------------------------
+# Version discovery — auto-probe ti.com for available SDK versions per device
+#
+# No hardcoded version lists. Each device is probed via 4 URL patterns in
+# parallel (HEAD requests). The matching ti.com download page is scraped for
+# the items="[...]" attribute (server-side rendered, no JS needed).
+#
+# Cache: per-device dict with _CATALOG_TTL invalidation. Graceful failure
+# (returns []) for devices without a ti.com download page (e.g. DRA821A).
+# ---------------------------------------------------------------------------
+
+_TI_TOOL_ID_CACHE:   dict[str, str | None]            = {}
+_TI_VERSIONS_CACHE:  dict[str, tuple[float, list]]    = {}
+_TI_VERSION_LOCKS:   dict[str, asyncio.Lock]          = {}
+_TI_VERSION_GLOBAL_LOCK: asyncio.Lock | None          = None
+_TI_ITEMS_RE = re.compile(r'items="(\[.*?\])"', re.DOTALL)
+
+# Allow overriding probe result for a device: DEVICE=TOOL_ID,DEVICE2=TOOL_ID2
+_TI_TOOL_ID_OVERRIDES: dict[str, str] = {}
+_TI_TOOL_ID_OVERRIDES_ENV = _os.environ.get("TI_PROCESSOR_SDK_TOOL_ID_OVERRIDES", "")
+if _TI_TOOL_ID_OVERRIDES_ENV:
+    for _ov_entry in _TI_TOOL_ID_OVERRIDES_ENV.split(","):
+        _ov_entry = _ov_entry.strip()
+        if "=" in _ov_entry:
+            _ov_dev, _ov_tid = _ov_entry.split("=", 1)
+            _TI_TOOL_ID_OVERRIDES[_ov_dev.strip().upper()] = _ov_tid.strip()
+
+
+async def _probe_ti_tool_id(device: str) -> str | None:
+    """Probe ti.com to find the download tool ID for device (cached after first hit)."""
+    if device in _TI_TOOL_ID_OVERRIDES:
+        return _TI_TOOL_ID_OVERRIDES[device]
+    if device in _TI_TOOL_ID_CACHE:
+        return _TI_TOOL_ID_CACHE[device]
+
+    patterns = [
+        f"PROCESSOR-SDK-LINUX-{device}",
+        f"PROCESSOR-SDK-LINUX-{device[:-1]}",
+        f"{device[:-1]}-LINUX-SDK",
+        f"{device}-PROCESSOR-LINUX-SDK",
+    ]
+    async with httpx.AsyncClient(timeout=4, follow_redirects=False) as client:
+        tasks = [client.head(f"https://www.ti.com/tool/download/{p}") for p in patterns]
+        probe_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    tool_id = None
+    for pattern, result in zip(patterns, probe_results):
+        if not isinstance(result, Exception) and result.status_code == 200:
+            tool_id = pattern
+            break
+
+    _TI_TOOL_ID_CACHE[device] = tool_id
+    return tool_id
+
+
+async def _fetch_ti_versions(device: str) -> list[dict]:
+    """Return list of {version, short, label} dicts from ti.com download page (cached)."""
+    global _TI_VERSION_GLOBAL_LOCK
+    now = time.monotonic()
+    if device in _TI_VERSIONS_CACHE:
+        loaded_at, versions = _TI_VERSIONS_CACHE[device]
+        if (now - loaded_at) < _CATALOG_TTL:
+            return versions
+
+    if _TI_VERSION_GLOBAL_LOCK is None:
+        _TI_VERSION_GLOBAL_LOCK = asyncio.Lock()
+    async with _TI_VERSION_GLOBAL_LOCK:
+        if device not in _TI_VERSION_LOCKS:
+            _TI_VERSION_LOCKS[device] = asyncio.Lock()
+
+    async with _TI_VERSION_LOCKS[device]:
+        if device in _TI_VERSIONS_CACHE:
+            loaded_at, versions = _TI_VERSIONS_CACHE[device]
+            if (now - loaded_at) < _CATALOG_TTL:
+                return versions
+
+        tool_id = await _probe_ti_tool_id(device)
+        if not tool_id:
+            _TI_VERSIONS_CACHE[device] = (time.monotonic(), [])
+            return []
+
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                async with _http_semaphore():
+                    r = await client.get(
+                        f"https://www.ti.com/tool/download/{tool_id}",
+                        headers={"User-Agent": "Mozilla/5.0"},
+                    )
+            m = _TI_ITEMS_RE.search(r.text)
+            if not m:
+                versions = []
+            else:
+                raw = json.loads(_html.unescape(m.group(1)))
+                versions = []
+                for group in raw:
+                    for v in group.get("children", []):
+                        ver_dot = v["value"].split("/")[-1]
+                        ver_us  = ver_dot.replace(".", "_")
+                        short   = ".".join(ver_dot.split(".")[:2])
+                        versions.append({
+                            "version": ver_us,
+                            "short":   short,
+                            "label":   v.get("label", ver_dot),
+                        })
+        except Exception as exc:
+            sys.stderr.write(f"Warning: version fetch failed for {device}: {exc}\n")
+            versions = []
+
+        _TI_VERSIONS_CACHE[device] = (time.monotonic(), versions)
+        return versions
+
+
+async def _resolve_version(device: str, version: str) -> tuple[str, str | None]:
+    """Resolve a short version alias ('12.01') to full form ('12_01_00_05_03').
+
+    Returns (resolved_version, error_message). error_message is None on success.
+    Pass-through for 'latest' and already-full version strings.
+    """
+    if version == "latest" or _VERSION_RE.match(version):
+        return version, None
+    # Short version — look up in ti.com catalog
+    versions = await _fetch_ti_versions(device)
+    if not versions:
+        return version, (
+            f"Cannot resolve version {version!r} for {device}: no version list from ti.com. "
+            "Use an explicit version string like '12_01_00_05_03' or 'latest'."
+        )
+    ver_dot = version.replace("_", ".")
+    for v in versions:
+        if v["short"] == ver_dot or v["version"] == version.replace(".", "_"):
+            return v["version"], None
+    available = sorted({v["short"] for v in versions})
+    return version, (
+        f"Version {version!r} not found for {device}. "
+        f"Available short aliases: {', '.join(available)}. "
+        "Or use full version string like '12_01_00_05_03'."
+    )
 
 
 def _software_dl_url(device: str, os_type: str, version: str, rt: bool) -> str:
@@ -947,6 +1092,33 @@ async def ti_processor_sdk_docs_list_variants() -> str:
     return json.dumps(result, indent=2)
 
 
+@mcp.tool()
+async def ti_processor_sdk_docs_list_versions(
+    device: str = _DEFAULT_DEVICE,
+) -> str:
+    """List all available SDK versions for a device from ti.com.
+
+    Discovers versions by scraping the ti.com download page for the device.
+    Cached for 24 hours (configurable via TI_PROCESSOR_SDK_CATALOG_TTL).
+    Returns empty list for devices without a public ti.com download page
+    (e.g. DRA821A, TDA4VM — these share another device's SDK).
+
+    Args:
+        device: Device family (e.g. "AM62X", "AM64X", "J721E").
+
+    Returns:
+        JSON object with tool_id (ti.com download page ID) and versions array.
+        Each version: {version (full underscore form), short (e.g. "12.01"), label}.
+        Versions listed newest-first. Use short alias in search/read version parameter.
+    """
+    err = _validate(device=device)
+    if err:
+        return err
+    tool_id = await _probe_ti_tool_id(device)
+    versions = await _fetch_ti_versions(device)
+    return json.dumps({"tool_id": tool_id, "versions": versions}, indent=2)
+
+
 def _doc_indices(v: Any) -> list[int]:
     return [v] if isinstance(v, int) else list(v)
 
@@ -969,8 +1141,8 @@ async def ti_processor_sdk_docs_search(
         device: Target device family (e.g. "AM62X", "AM64X", "AM62PX", "J721E").
                 Run ti_processor_sdk_docs_list_variants to see all supported combos.
         os: OS type: "linux" (default), "debian", or "buildroot".
-        version: SDK version string ("latest" or e.g. "12_01_00_05_03").
-                 Ignored when source="github".
+        version: SDK version ("latest", full string like "12_01_00_05_03", or short
+                 alias like "12.01"). Ignored when source="github".
         rt: True to query the processor-sdk-linux-rt prefix. Ignored when source="github".
         source: "software-dl" (default, versioned) or "github" (latest master only).
         max_results: Pages to return, default 8, max 20.
@@ -982,6 +1154,10 @@ async def ti_processor_sdk_docs_search(
     err = _validate(device=device, os_type=os, version=version, source=source, query=query)
     if err:
         return err
+    if source == "software-dl":
+        version, ver_err = await _resolve_version(device, version)
+        if ver_err:
+            return ver_err
     max_results = min(max(1, max_results), _MAX_SEARCH_RESULTS)
     try:
         idx = await _ensure_index(device, os, version, rt, source)
@@ -1048,7 +1224,8 @@ async def ti_processor_sdk_docs_read(
               .html extension optional.
         device: Target device -- must match the device used in ti_processor_sdk_docs_search.
         os: OS type: "linux", "debian", or "buildroot".
-        version: SDK version ("latest" or e.g. "12_01_00_05_03"). Ignored when source="github".
+        version: SDK version ("latest", full string like "12_01_00_05_03", or short
+                 alias like "12.01"). Ignored when source="github".
         rt: True to use processor-sdk-linux-rt prefix. Ignored when source="github".
         source: "software-dl" (default, versioned) or "github" (latest master only).
 
@@ -1059,6 +1236,10 @@ async def ti_processor_sdk_docs_read(
     err = _validate(device=device, os_type=os, version=version, source=source, path=path)
     if err:
         return err
+    if source == "software-dl":
+        version, ver_err = await _resolve_version(device, version)
+        if ver_err:
+            return ver_err
     if not path.endswith(".html"):
         path = path + ".html"
     try:
