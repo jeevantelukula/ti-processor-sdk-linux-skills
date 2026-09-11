@@ -163,6 +163,19 @@ ti_processor_sdk_docs_list_versions(device="AM62X")
 | `source` | `software-dl` | `software-dl` (versioned) or `github` (latest master) |
 | `max_results` | `8` | Max pages returned (max 20) |
 
+**Result fields:**
+
+| Field | Always present | Description |
+|---|---|---|
+| `title` | yes | Page title (HTML stripped) |
+| `path` | yes | Relative HTML path — pass directly to `ti_processor_sdk_docs_read` |
+| `score` | yes | Relevance score (higher = better) |
+| `page_type` | FTS5 only | `release_notes`, `migration_guide`, `getting_started`, `how_to`, `driver_reference`, `overview`, or `other` |
+| `matched_terms` | FTS5 only | Which base query words matched this page |
+| `coverage` | FTS5 only | Fraction of query words matched (0.0–1.0) |
+
+FTS5 fields are present when `searchindex.db` exists for the SDK version (built by `scripts/build_searchindex.py` in the docs repo). Older SDK versions fall back to Sphinx IDF scoring and return only `title`, `path`, `score`.
+
 **Example — AM62X GPIO:**
 ```
 ti_processor_sdk_docs_search("GPIO pinmux IOPAD RXACTIVE", device="AM62X", os="linux")
@@ -210,11 +223,16 @@ ti_processor_sdk_docs_read(
 
 ## How it works
 
-1. **First call for a variant:** Fetches `searchindex.js` from software-dl.ti.com (~300 KB).
-   Contains all page titles and a full term index. No external DB, no embeddings. Cached in memory.
+1. **First call for a variant:** Fetches `searchindex.js` (~300 KB) from software-dl.ti.com.
+   Contains all page titles and a full term index. No embeddings. Cached in memory.
+   Also attempts to fetch `searchindex.db` (~5–15 MB SQLite FTS5 index, if available).
 
-2. **`ti_processor_sdk_docs_search`:** Tokenizes query, scores pages by term-hit count,
-   boosts pages whose title matches, returns top N results.
+2. **`ti_processor_sdk_docs_search`:** Two search paths:
+   - **FTS5 (primary):** If `searchindex.db` exists, runs BM25-ranked FTS5 query with OR
+     semantics, explicit column weights (title 10×, code blocks 5×, body text 1×), and TI
+     synonym expansion. Returns `page_type`, `matched_terms`, and `coverage` alongside results.
+   - **Sphinx IDF (fallback):** If `searchindex.db` absent (old SDK versions), scores pages
+     using term-hit IDF with title 3× boost. Returns `title`, `path`, `score` only.
 
 3. **`ti_processor_sdk_docs_read`:** Fetches HTML page (~50–150 KB), strips navigation/sidebar,
    converts headings to `#` markdown and code blocks to ` ``` `. Cached per variant.
