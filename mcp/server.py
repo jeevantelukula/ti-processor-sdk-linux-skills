@@ -52,8 +52,8 @@ import json
 import math
 import os as _os
 import re
-import sys
 import sqlite3
+import sys
 import tempfile
 import time
 
@@ -112,7 +112,7 @@ def _validate(
     source: str | None = None,
     query: str | None = None,
 ) -> str | None:
-    """Validate tool inputs. Returns an error string on failure, None on success."""
+    """Return an error string on invalid input, None on success."""
     if device is not None and not _DEVICE_RE.match(device):
         return (
             f"Invalid device {device!r}: must be 1-20 uppercase alphanumeric chars "
@@ -146,22 +146,346 @@ def _validate(
 
 
 # ---------------------------------------------------------------------------
+# URL construction
+# ---------------------------------------------------------------------------
+
+_OS_PREFIX: dict[str, str] = {
+    "linux":     "processor-sdk-linux",
+    "debian":    "processor-sdk-linux",
+    "buildroot": "processor-sdk-linux",
+    "android":   "processor-sdk-android",
+    "edgeai":    "processor-sdk-linux",
+}
+_OS_SUFFIX: dict[str, str] = {
+    "linux":     "",
+    "debian":    "_Debian",
+    "buildroot": "_Buildroot",
+    "android":   "",
+    "edgeai":    "",
+}
+_OS_LATEST: dict[str, str] = {
+    "linux":     "latest",
+    "debian":    "latest_Debian",
+    "buildroot": "latest_Buildroot",
+    "android":   "latest",
+    "edgeai":    "latest",
+}
+
+
+def _parse_os_patterns() -> None:
+    """Populate OS URL maps from TI_PROCESSOR_SDK_OS_PATTERNS env var.
+
+    Format: os:prefix:version_suffix:latest_dir  (comma-separated entries)
+    Example: rtos:processor-sdk-rtos::latest,newos:processor-sdk-linux:_NewOS:latest_NewOS
+    """
+    raw = _os.environ.get("TI_PROCESSOR_SDK_OS_PATTERNS", "")
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        parts = entry.split(":")
+        if len(parts) != 4:
+            sys.stderr.write(
+                f"Warning: TI_PROCESSOR_SDK_OS_PATTERNS entry {entry!r} invalid -- "
+                "expected os:prefix:version_suffix:latest_dir, skipping.\n"
+            )
+            continue
+        os_name, prefix, suffix, latest = parts
+        _OS_PREFIX[os_name] = prefix
+        _OS_SUFFIX[os_name] = suffix
+        _OS_LATEST[os_name] = latest
+        sys.stderr.write(
+            f"OS pattern override: {os_name} -> "
+            f"prefix={prefix!r} suffix={suffix!r} latest={latest!r}\n"
+        )
+
+
+_parse_os_patterns()
+
+
+def _software_dl_url(device: str, os_type: str, version: str, rt: bool) -> str:
+    if os_type not in _OS_PREFIX:
+        sys.stderr.write(
+            f"Warning: unknown OS type '{os_type}' -- falling back to processor-sdk-linux. "
+            f"Set TI_PROCESSOR_SDK_OS_PATTERNS to add '{os_type}' without editing server.py.\n"
+        )
+    base_prefix = _OS_PREFIX.get(os_type, "processor-sdk-linux")
+    if rt and os_type == "linux":
+        base_prefix = "processor-sdk-linux-rt"
+    ver_dir = (
+        _OS_LATEST.get(os_type, "latest") if version == "latest"
+        else version + _OS_SUFFIX.get(os_type, "")
+    )
+    return f"https://software-dl.ti.com/{base_prefix}/esd/{device}/{ver_dir}/exports/docs"
+
+
+def _github_pages_url(device: str, os_type: str) -> str:
+    return (
+        f"https://texasinstruments.github.io/processor-sdk-doc"
+        f"/processor-sdk-{os_type}-{device}/esd/docs/master"
+    )
+
+
+def _make_url(device: str, os_type: str, version: str, rt: bool, source: str) -> str:
+    if source == "github":
+        return _github_pages_url(device, os_type)
+    return _software_dl_url(device, os_type, version, rt)
+
+
+# ---------------------------------------------------------------------------
+# Local docs root -- nightly build disk access (staging mode)
+#
+# Set TI_PROCESSOR_SDK_DOCS_LOCAL_ROOT to the nightly build root, e.g.:
+#   /datalocal/nightly_builds/nightly/smpusdk-docs-build/
+#
+# Structure: {root}/{device}-evm/{build_id}_{date}/processor-sdk-{os}-docs/
+# ---------------------------------------------------------------------------
+
+_LOCAL_DOCS_ROOT: Path | None = (
+    Path(_os.environ["TI_PROCESSOR_SDK_DOCS_LOCAL_ROOT"])
+    if "TI_PROCESSOR_SDK_DOCS_LOCAL_ROOT" in _os.environ else None
+)
+
+_KNOWN_OS_TYPES = ["linux", "debian", "buildroot", "android", "edgeai"]
+
+
+def _local_device_dir(device: str) -> str:
+    return device.lower() + "-evm"
+
+
+def _local_os_docs_dir(os_type: str) -> str:
+    return f"processor-sdk-{os_type}-docs"
+
+
+def _local_latest_docs(device_path: Path, os_type: str) -> Path | None:
+    """Return path to latest build's docs dir for given OS (highest build ID), or None."""
+    os_docs_name = _local_os_docs_dir(os_type)
+    candidates: list[tuple[int, Path]] = []
+    try:
+        for build_dir in device_path.iterdir():
+            if not build_dir.is_dir():
+                continue
+            docs_path = build_dir / os_docs_name
+            if not (docs_path / "searchindex.js").exists():
+                continue
+            try:
+                build_id = int(build_dir.name.split("_")[0])
+                candidates.append((build_id, docs_path))
+            except (ValueError, IndexError):
+                continue
+    except PermissionError:
+        return None
+    return max(candidates, key=lambda x: x[0])[1] if candidates else None
+
+
+def _local_versioned_docs(device_path: Path, os_type: str, version: str) -> Path | None:
+    """Return docs path for build dir whose name contains version as substring."""
+    os_docs_name = _local_os_docs_dir(os_type)
+    try:
+        for build_dir in sorted(device_path.iterdir()):
+            if version not in build_dir.name:
+                continue
+            docs_path = build_dir / os_docs_name
+            if (docs_path / "searchindex.js").exists():
+                return docs_path
+    except PermissionError:
+        return None
+    return None
+
+
+def _resolve_local_docs(device: str, os_type: str, version: str) -> Path | None:
+    if _LOCAL_DOCS_ROOT is None:
+        return None
+    device_path = _LOCAL_DOCS_ROOT / _local_device_dir(device)
+    if not device_path.is_dir():
+        return None
+    if version == "latest":
+        return _local_latest_docs(device_path, os_type)
+    return _local_versioned_docs(device_path, os_type, version)
+
+
+def _catalog_from_local_root(root: Path) -> list[dict[str, str]]:
+    """Discover (device, os) combos from nightly build root structure."""
+    result = []
+    try:
+        dirs = sorted(root.iterdir())
+    except PermissionError:
+        return result
+    for device_path in dirs:
+        if not device_path.is_dir() or not device_path.name.endswith("-evm"):
+            continue
+        device = device_path.name[:-4].upper()
+        for os_type in _KNOWN_OS_TYPES:
+            if _local_latest_docs(device_path, os_type) is not None:
+                result.append({"device": device, "os": os_type})
+    return result
+
+
+# ---------------------------------------------------------------------------
+# HTTP docs root -- nightly build HTTP access (autoindex mode)
+#
+# Set TI_PROCESSOR_SDK_DOCS_HTTP_ROOT to the HTTP-served nightly build root, e.g.:
+#   http://swubn04.india.englab.ti.com/smpusdk-docs-build
+#
+# Structure (same as local root, served via HTTP with autoindex enabled):
+#   {root}/{device}-evm/{build_id}_{date}/processor-sdk-{os}-docs/
+# ---------------------------------------------------------------------------
+
+_HTTP_DOCS_ROOT: str | None = (
+    _os.environ.get("TI_PROCESSOR_SDK_DOCS_HTTP_ROOT", "").rstrip("/") or None
+)
+
+if _HTTP_DOCS_ROOT is not None:
+    try:
+        _check_url_host(_HTTP_DOCS_ROOT, "TI_PROCESSOR_SDK_DOCS_HTTP_ROOT")
+    except ValueError as _exc:
+        sys.stderr.write(f"ERROR: {_exc}\n")
+        sys.exit(1)
+
+_AUTOINDEX_HREF_RE = re.compile(r'href="([^"?/][^"]*?/)"')
+
+# Resolved HTTP docs URLs -- avoids repeated HEAD scans per tool call.
+# Keyed by (device, os_type, version). Invalidated on server restart.
+_HTTP_DOCS_CACHE:      dict[tuple, str | None] = {}
+_HTTP_DOCS_CACHE_LOCK  = asyncio.Lock()
+
+
+async def _http_list_dir(url: str) -> list[str]:
+    """Fetch autoindex page and return list of directory entry names."""
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            async with _FETCH_SEMAPHORE:
+                r = await client.get(url.rstrip("/") + "/")
+            if r.status_code != 200:
+                return []
+            return _AUTOINDEX_HREF_RE.findall(r.text)
+    except httpx.RequestError:
+        return []
+
+
+async def _http_latest_build(root: str, device_evm: str, os_type: str) -> str | None:
+    """Return URL of latest (highest build ID) docs dir for device+os, or None."""
+    entries = await _http_list_dir(f"{root}/{device_evm}")
+    os_docs_name = _local_os_docs_dir(os_type)
+    candidates: list[tuple[int, str]] = []
+    for entry in entries:
+        name = entry.rstrip("/")
+        try:
+            build_id = int(name.split("_")[0])
+        except (ValueError, IndexError):
+            continue
+        candidates.append((build_id, name))
+    if not candidates:
+        return None
+    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+        for _, build_name in sorted(candidates, reverse=True):
+            url = f"{root}/{device_evm}/{build_name}/{os_docs_name}"
+            try:
+                async with _FETCH_SEMAPHORE:
+                    r = await client.head(f"{url}/searchindex.js")
+                if r.status_code == 200:
+                    return url
+            except httpx.RequestError:
+                continue
+    return None
+
+
+async def _resolve_http_docs(device: str, os_type: str, version: str) -> str | None:
+    """Resolve HTTP docs base URL for (device, os_type, version). Cached for server lifetime."""
+    if _HTTP_DOCS_ROOT is None:
+        return None
+    cache_key = (device, os_type, version)
+    if cache_key in _HTTP_DOCS_CACHE:
+        return _HTTP_DOCS_CACHE[cache_key]
+    async with _HTTP_DOCS_CACHE_LOCK:
+        if cache_key in _HTTP_DOCS_CACHE:
+            return _HTTP_DOCS_CACHE[cache_key]
+        device_evm = _local_device_dir(device)
+        if version == "latest":
+            url = await _http_latest_build(_HTTP_DOCS_ROOT, device_evm, os_type)
+        else:
+            url = None
+            os_docs_name = _local_os_docs_dir(os_type)
+            entries = await _http_list_dir(f"{_HTTP_DOCS_ROOT}/{device_evm}")
+            for entry in sorted(entries):
+                name = entry.rstrip("/")
+                if version not in name:
+                    continue
+                candidate = f"{_HTTP_DOCS_ROOT}/{device_evm}/{name}/{os_docs_name}"
+                try:
+                    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                        async with _FETCH_SEMAPHORE:
+                            r = await client.head(f"{candidate}/searchindex.js")
+                        if r.status_code == 200:
+                            url = candidate
+                            break
+                except httpx.RequestError:
+                    pass
+        _HTTP_DOCS_CACHE[cache_key] = url
+        return url
+
+
+async def _catalog_from_http_root(root: str) -> list[dict[str, str]]:
+    """Discover (device, os) combos by parsing autoindex at root URL."""
+    device_entries = await _http_list_dir(root)
+    device_entries = [e.rstrip("/") for e in device_entries if e.rstrip("/").endswith("-evm")]
+
+    async def _probe(device_evm: str, os_type: str) -> dict | None:
+        device = device_evm[:-4].upper()
+        url = await _http_latest_build(root, device_evm, os_type)
+        return {"device": device, "os": os_type} if url else None
+
+    found = await asyncio.gather(*[
+        _probe(d, o) for d in device_entries for o in _KNOWN_OS_TYPES
+    ])
+    return [f for f in found if f is not None]
+
+
+# ---------------------------------------------------------------------------
+# Legacy single-variant mode
+# ---------------------------------------------------------------------------
+
+_LEGACY_URL: str | None = (
+    _os.environ.get("TI_PROCESSOR_SDK_DOCS_URL", "").rstrip("/") or None
+)
+_LEGACY_ROOT: Path | None = (
+    Path(_os.environ["TI_PROCESSOR_SDK_DOCS_ROOT"])
+    if "TI_PROCESSOR_SDK_DOCS_ROOT" in _os.environ else None
+)
+
+if _LEGACY_URL is not None:
+    try:
+        _check_url_host(_LEGACY_URL, "TI_PROCESSOR_SDK_DOCS_URL")
+    except ValueError as _exc:
+        sys.stderr.write(f"ERROR: {_exc}\n")
+        sys.exit(1)
+
+_LEGACY_KEY = ("__legacy__", "__legacy__", "__legacy__", False, "__legacy__")
+
+
+def _is_legacy_mode() -> bool:
+    return _LEGACY_URL is not None or _LEGACY_ROOT is not None
+
+
+# ---------------------------------------------------------------------------
 # Catalog -- dynamically loaded from processor-sdk-doc configs/
 #
 # Source priority: TI_PROCESSOR_SDK_DOC_CONFIGS env var -> adjacent repo -> GitHub tree API
 # ---------------------------------------------------------------------------
 
 _CATALOG: list[dict[str, str]] | None = None
-_CATALOG_LOCK: asyncio.Lock | None = None
+_CATALOG_LOCK      = asyncio.Lock()
 _CATALOG_LOADED_AT: float = 0.0
-_CATALOG_TTL: int = int(_os.environ.get("TI_PROCESSOR_SDK_CATALOG_TTL", "86400"))
+_CATALOG_TTL: int  = int(_os.environ.get("TI_PROCESSOR_SDK_CATALOG_TTL", "86400"))
 _GITHUB_TOKEN: str = _os.environ.get("GITHUB_TOKEN", "")
+
 
 def _find_local_configs() -> Path | None:
     if cfg := _os.environ.get("TI_PROCESSOR_SDK_DOC_CONFIGS"):
         return Path(cfg)
     adj = Path(__file__).parent.parent.parent / "processor-sdk-doc" / "configs"
     return adj if adj.is_dir() else None
+
 
 _LOCAL_CONFIGS: Path | None = _find_local_configs()
 
@@ -194,7 +518,7 @@ async def _catalog_from_github() -> list[dict[str, str]]:
     if _GITHUB_TOKEN:
         headers["Authorization"] = f"Bearer {_GITHUB_TOKEN}"
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        async with _http_semaphore():
+        async with _FETCH_SEMAPHORE:
             r = await client.get(url, headers=headers)
         r.raise_for_status()
         data = r.json()
@@ -231,12 +555,10 @@ async def _catalog_from_github() -> list[dict[str, str]]:
 
 
 async def _ensure_catalog() -> list[dict[str, str]]:
-    global _CATALOG, _CATALOG_LOCK, _CATALOG_LOADED_AT
+    global _CATALOG, _CATALOG_LOADED_AT
     now = time.monotonic()
     if _CATALOG is not None and (now - _CATALOG_LOADED_AT) < _CATALOG_TTL:
         return _CATALOG
-    if _CATALOG_LOCK is None:
-        _CATALOG_LOCK = asyncio.Lock()
     async with _CATALOG_LOCK:
         now = time.monotonic()
         if _CATALOG is not None and (now - _CATALOG_LOADED_AT) < _CATALOG_TTL:
@@ -307,55 +629,6 @@ def _expand_terms(words: list[str]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# URL construction
-# ---------------------------------------------------------------------------
-
-_OS_PREFIX: dict[str, str] = {
-    "linux":     "processor-sdk-linux",
-    "debian":    "processor-sdk-linux",
-    "buildroot": "processor-sdk-linux",
-    "android":   "processor-sdk-android",
-    "edgeai":    "processor-sdk-linux",
-}
-_OS_SUFFIX: dict[str, str] = {
-    "linux":     "",
-    "debian":    "_Debian",
-    "buildroot": "_Buildroot",
-    "android":   "",
-    "edgeai":    "",
-}
-_OS_LATEST: dict[str, str] = {
-    "linux":     "latest",
-    "debian":    "latest_Debian",
-    "buildroot": "latest_Buildroot",
-    "android":   "latest",
-    "edgeai":    "latest",
-}
-
-# Allow external OS pattern config without editing server.py.
-# Format: os:prefix:version_suffix:latest_dir  (comma-separated)
-# Example: TI_PROCESSOR_SDK_OS_PATTERNS=rtos:processor-sdk-rtos::latest,newos:processor-sdk-linux:_NewOS:latest_NewOS
-_OS_PATTERNS_ENV = _os.environ.get("TI_PROCESSOR_SDK_OS_PATTERNS", "")
-if _OS_PATTERNS_ENV:
-    for _entry in _OS_PATTERNS_ENV.split(","):
-        _entry = _entry.strip()
-        if not _entry:
-            continue
-        _parts = _entry.split(":")
-        if len(_parts) != 4:
-            sys.stderr.write(
-                f"Warning: TI_PROCESSOR_SDK_OS_PATTERNS entry {_entry!r} invalid -- "
-                "expected os:prefix:version_suffix:latest_dir, skipping.\n"
-            )
-            continue
-        _os_name, _prefix, _suffix, _latest = _parts
-        _OS_PREFIX[_os_name] = _prefix
-        _OS_SUFFIX[_os_name] = _suffix
-        _OS_LATEST[_os_name] = _latest
-        sys.stderr.write(f"OS pattern override: {_os_name} -> prefix={_prefix!r} suffix={_suffix!r} latest={_latest!r}\n")
-
-
-# ---------------------------------------------------------------------------
 # Version discovery — auto-probe ti.com for available SDK versions per device
 #
 # No hardcoded version lists. Each device is probed via 4 URL patterns in
@@ -366,21 +639,26 @@ if _OS_PATTERNS_ENV:
 # (returns []) for devices without a ti.com download page (e.g. DRA821A).
 # ---------------------------------------------------------------------------
 
-_TI_TOOL_ID_CACHE:   dict[str, str | None]            = {}
-_TI_VERSIONS_CACHE:  dict[str, tuple[float, list]]    = {}
-_TI_VERSION_LOCKS:   dict[str, asyncio.Lock]          = {}
-_TI_VERSION_GLOBAL_LOCK: asyncio.Lock | None          = None
+_TI_TOOL_ID_CACHE:      dict[str, str | None]         = {}
+_TI_VERSIONS_CACHE:     dict[str, tuple[float, list]] = {}
+_TI_VERSION_LOCKS:      dict[str, asyncio.Lock]       = {}
+_TI_VERSION_GLOBAL_LOCK = asyncio.Lock()
 _TI_ITEMS_RE = re.compile(r'items="(\[.*?\])"', re.DOTALL)
 
-# Allow overriding probe result for a device: DEVICE=TOOL_ID,DEVICE2=TOOL_ID2
-_TI_TOOL_ID_OVERRIDES: dict[str, str] = {}
-_TI_TOOL_ID_OVERRIDES_ENV = _os.environ.get("TI_PROCESSOR_SDK_TOOL_ID_OVERRIDES", "")
-if _TI_TOOL_ID_OVERRIDES_ENV:
-    for _ov_entry in _TI_TOOL_ID_OVERRIDES_ENV.split(","):
-        _ov_entry = _ov_entry.strip()
-        if "=" in _ov_entry:
-            _ov_dev, _ov_tid = _ov_entry.split("=", 1)
-            _TI_TOOL_ID_OVERRIDES[_ov_dev.strip().upper()] = _ov_tid.strip()
+
+def _parse_tool_id_overrides() -> dict[str, str]:
+    """Parse TI_PROCESSOR_SDK_TOOL_ID_OVERRIDES into a device -> tool_id dict."""
+    overrides: dict[str, str] = {}
+    raw = _os.environ.get("TI_PROCESSOR_SDK_TOOL_ID_OVERRIDES", "")
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if "=" in entry:
+            dev, tid = entry.split("=", 1)
+            overrides[dev.strip().upper()] = tid.strip()
+    return overrides
+
+
+_TI_TOOL_ID_OVERRIDES: dict[str, str] = _parse_tool_id_overrides()
 
 
 async def _probe_ti_tool_id(device: str) -> str | None:
@@ -397,30 +675,28 @@ async def _probe_ti_tool_id(device: str) -> str | None:
         f"{device}-PROCESSOR-LINUX-SDK",
     ]
     async with httpx.AsyncClient(timeout=4, follow_redirects=False) as client:
-        tasks = [client.head(f"https://www.ti.com/tool/download/{p}") for p in patterns]
-        probe_results = await asyncio.gather(*tasks, return_exceptions=True)
+        probe_results = await asyncio.gather(
+            *[client.head(f"https://www.ti.com/tool/download/{p}") for p in patterns],
+            return_exceptions=True,
+        )
 
-    tool_id = None
-    for pattern, result in zip(patterns, probe_results):
-        if not isinstance(result, Exception) and result.status_code == 200:
-            tool_id = pattern
-            break
-
+    tool_id = next(
+        (p for p, r in zip(patterns, probe_results)
+         if not isinstance(r, Exception) and r.status_code == 200),
+        None,
+    )
     _TI_TOOL_ID_CACHE[device] = tool_id
     return tool_id
 
 
 async def _fetch_ti_versions(device: str) -> list[dict]:
     """Return list of {version, short, label} dicts from ti.com download page (cached)."""
-    global _TI_VERSION_GLOBAL_LOCK
     now = time.monotonic()
     if device in _TI_VERSIONS_CACHE:
         loaded_at, versions = _TI_VERSIONS_CACHE[device]
         if (now - loaded_at) < _CATALOG_TTL:
             return versions
 
-    if _TI_VERSION_GLOBAL_LOCK is None:
-        _TI_VERSION_GLOBAL_LOCK = asyncio.Lock()
     async with _TI_VERSION_GLOBAL_LOCK:
         if device not in _TI_VERSION_LOCKS:
             _TI_VERSION_LOCKS[device] = asyncio.Lock()
@@ -438,7 +714,7 @@ async def _fetch_ti_versions(device: str) -> list[dict]:
 
         try:
             async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-                async with _http_semaphore():
+                async with _FETCH_SEMAPHORE:
                     r = await client.get(
                         f"https://www.ti.com/tool/download/{tool_id}",
                         headers={"User-Agent": "Mozilla/5.0"},
@@ -475,7 +751,6 @@ async def _resolve_version(device: str, version: str) -> tuple[str, str | None]:
     """
     if version == "latest" or _VERSION_RE.match(version):
         return version, None
-    # Short version — look up in ti.com catalog
     versions = await _fetch_ti_versions(device)
     if not versions:
         return version, (
@@ -494,311 +769,27 @@ async def _resolve_version(device: str, version: str) -> tuple[str, str | None]:
     )
 
 
-def _software_dl_url(device: str, os_type: str, version: str, rt: bool) -> str:
-    if os_type not in _OS_PREFIX:
-        sys.stderr.write(
-            f"Warning: unknown OS type '{os_type}' -- falling back to processor-sdk-linux. "
-            f"Set TI_PROCESSOR_SDK_OS_PATTERNS to add '{os_type}' without editing server.py.\n"
-        )
-    base_prefix = _OS_PREFIX.get(os_type, "processor-sdk-linux")
-    if rt and os_type == "linux":
-        base_prefix = "processor-sdk-linux-rt"
-    ver_dir = (
-        _OS_LATEST.get(os_type, "latest") if version == "latest"
-        else version + _OS_SUFFIX.get(os_type, "")
-    )
-    return f"https://software-dl.ti.com/{base_prefix}/esd/{device}/{ver_dir}/exports/docs"
-
-
-def _github_pages_url(device: str, os_type: str) -> str:
-    return (
-        f"https://texasinstruments.github.io/processor-sdk-doc"
-        f"/processor-sdk-{os_type}-{device}/esd/docs/master"
-    )
-
-
-def _make_url(device: str, os_type: str, version: str, rt: bool, source: str) -> str:
-    if source == "github":
-        return _github_pages_url(device, os_type)
-    return _software_dl_url(device, os_type, version, rt)
-
-
-# ---------------------------------------------------------------------------
-# Local docs root -- nightly build disk access (staging mode)
-#
-# Set TI_PROCESSOR_SDK_DOCS_LOCAL_ROOT to the nightly build root, e.g.:
-#   /datalocal/nightly_builds/nightly/smpusdk-docs-build/
-#
-# Structure: {root}/{device}-evm/{build_id}_{date}/processor-sdk-{os}-docs/
-# ---------------------------------------------------------------------------
-
-_LOCAL_DOCS_ROOT: Path | None = (
-    Path(_os.environ["TI_PROCESSOR_SDK_DOCS_LOCAL_ROOT"])
-    if "TI_PROCESSOR_SDK_DOCS_LOCAL_ROOT" in _os.environ else None
-)
-
-
-def _local_device_dir(device: str) -> str:
-    return device.lower() + "-evm"
-
-
-def _local_os_docs_dir(os_type: str) -> str:
-    return f"processor-sdk-{os_type}-docs"
-
-
-def _local_latest_docs(device_path: Path, os_type: str) -> Path | None:
-    """Return path to latest build's docs dir for given OS (highest build ID), or None."""
-    os_docs_name = _local_os_docs_dir(os_type)
-    candidates: list[tuple[int, Path]] = []
-    try:
-        for build_dir in device_path.iterdir():
-            if not build_dir.is_dir():
-                continue
-            docs_path = build_dir / os_docs_name
-            if not (docs_path / "searchindex.js").exists():
-                continue
-            try:
-                build_id = int(build_dir.name.split("_")[0])
-                candidates.append((build_id, docs_path))
-            except (ValueError, IndexError):
-                continue
-    except PermissionError:
-        return None
-    return max(candidates, key=lambda x: x[0])[1] if candidates else None
-
-
-def _local_versioned_docs(device_path: Path, os_type: str, version: str) -> Path | None:
-    """Return docs path for build dir whose name contains version as substring."""
-    os_docs_name = _local_os_docs_dir(os_type)
-    try:
-        for build_dir in sorted(device_path.iterdir()):
-            if version not in build_dir.name:
-                continue
-            docs_path = build_dir / os_docs_name
-            if (docs_path / "searchindex.js").exists():
-                return docs_path
-    except PermissionError:
-        return None
-    return None
-
-
-def _resolve_local_docs(device: str, os_type: str, version: str) -> Path | None:
-    if _LOCAL_DOCS_ROOT is None:
-        return None
-    device_path = _LOCAL_DOCS_ROOT / _local_device_dir(device)
-    if not device_path.is_dir():
-        return None
-    if version == "latest":
-        return _local_latest_docs(device_path, os_type)
-    return _local_versioned_docs(device_path, os_type, version)
-
-
-_KNOWN_OS_TYPES = ["linux", "debian", "buildroot", "android", "edgeai"]
-
-
-def _catalog_from_local_root(root: Path) -> list[dict[str, str]]:
-    """Discover (device, os) combos from nightly build root structure."""
-    result = []
-    try:
-        dirs = sorted(root.iterdir())
-    except PermissionError:
-        return result
-    for device_path in dirs:
-        if not device_path.is_dir() or not device_path.name.endswith("-evm"):
-            continue
-        device = device_path.name[:-4].upper()
-        for os_type in _KNOWN_OS_TYPES:
-            if _local_latest_docs(device_path, os_type) is not None:
-                result.append({"device": device, "os": os_type})
-    return result
-
-
-# ---------------------------------------------------------------------------
-# HTTP docs root -- nightly build HTTP access (autoindex mode)
-#
-# Set TI_PROCESSOR_SDK_DOCS_HTTP_ROOT to the HTTP-served nightly build root, e.g.:
-#   http://swubn04.india.englab.ti.com/smpusdk-docs-build
-#
-# Structure (same as local root, served via HTTP with autoindex enabled):
-#   {root}/{device}-evm/{build_id}_{date}/processor-sdk-{os}-docs/
-# ---------------------------------------------------------------------------
-
-_HTTP_DOCS_ROOT: str | None = (
-    _os.environ.get("TI_PROCESSOR_SDK_DOCS_HTTP_ROOT", "").rstrip("/") or None
-)
-
-if _HTTP_DOCS_ROOT is not None:
-    try:
-        _check_url_host(_HTTP_DOCS_ROOT, "TI_PROCESSOR_SDK_DOCS_HTTP_ROOT")
-    except ValueError as _exc:
-        sys.stderr.write(f"ERROR: {_exc}\n")
-        sys.exit(1)
-
-_AUTOINDEX_HREF_RE = re.compile(r'href="([^"?/][^"]*?/)"')
-
-
-async def _http_list_dir(url: str) -> list[str]:
-    """Fetch autoindex page and return list of directory entry names."""
-    try:
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            async with _http_semaphore():
-                r = await client.get(url.rstrip("/") + "/")
-            if r.status_code != 200:
-                return []
-            return _AUTOINDEX_HREF_RE.findall(r.text)
-    except httpx.RequestError:
-        return []
-
-
-async def _http_latest_build(root: str, device_evm: str, os_type: str) -> str | None:
-    """Return URL of latest (highest build ID) docs dir for device+os, or None.
-
-    Scans newest to oldest because not all builds produce all OS variants.
-    """
-    entries = await _http_list_dir(f"{root}/{device_evm}")
-    os_docs_name = _local_os_docs_dir(os_type)
-    candidates: list[tuple[int, str]] = []
-    for entry in entries:
-        name = entry.rstrip("/")
-        try:
-            build_id = int(name.split("_")[0])
-        except (ValueError, IndexError):
-            continue
-        candidates.append((build_id, name))
-    if not candidates:
-        return None
-    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-        for _, build_name in sorted(candidates, reverse=True):
-            url = f"{root}/{device_evm}/{build_name}/{os_docs_name}"
-            try:
-                async with _http_semaphore():
-                    r = await client.head(f"{url}/searchindex.js")
-                if r.status_code == 200:
-                    return url
-            except httpx.RequestError:
-                continue
-    return None
-
-
-# Cached resolved HTTP docs URLs -- avoids repeated HEAD scans per tool call.
-# Keyed by (device, os_type, version). Invalidated on server restart.
-_HTTP_DOCS_CACHE: dict[tuple, str | None] = {}
-_HTTP_DOCS_CACHE_LOCK: asyncio.Lock | None = None
-
-
-def _http_docs_cache_lock() -> asyncio.Lock:
-    global _HTTP_DOCS_CACHE_LOCK
-    if _HTTP_DOCS_CACHE_LOCK is None:
-        _HTTP_DOCS_CACHE_LOCK = asyncio.Lock()
-    return _HTTP_DOCS_CACHE_LOCK
-
-
-async def _resolve_http_docs(device: str, os_type: str, version: str) -> str | None:
-    """Resolve HTTP docs base URL for (device, os_type, version). Cached for server lifetime."""
-    if _HTTP_DOCS_ROOT is None:
-        return None
-    cache_key = (device, os_type, version)
-    if cache_key in _HTTP_DOCS_CACHE:
-        return _HTTP_DOCS_CACHE[cache_key]
-    async with _http_docs_cache_lock():
-        if cache_key in _HTTP_DOCS_CACHE:
-            return _HTTP_DOCS_CACHE[cache_key]
-        device_evm = _local_device_dir(device)
-        if version == "latest":
-            url = await _http_latest_build(_HTTP_DOCS_ROOT, device_evm, os_type)
-        else:
-            url = None
-            os_docs_name = _local_os_docs_dir(os_type)
-            entries = await _http_list_dir(f"{_HTTP_DOCS_ROOT}/{device_evm}")
-            for entry in sorted(entries):
-                name = entry.rstrip("/")
-                if version not in name:
-                    continue
-                candidate = f"{_HTTP_DOCS_ROOT}/{device_evm}/{name}/{os_docs_name}"
-                try:
-                    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-                        async with _http_semaphore():
-                            r = await client.head(f"{candidate}/searchindex.js")
-                        if r.status_code == 200:
-                            url = candidate
-                            break
-                except httpx.RequestError:
-                    pass
-        _HTTP_DOCS_CACHE[cache_key] = url
-        return url
-
-
-async def _catalog_from_http_root(root: str) -> list[dict[str, str]]:
-    """Discover (device, os) combos by parsing autoindex at root URL."""
-    device_entries = await _http_list_dir(root)
-    device_entries = [e.rstrip("/") for e in device_entries if e.rstrip("/").endswith("-evm")]
-
-    async def _probe(device_evm: str, os_type: str) -> dict | None:
-        device = device_evm[:-4].upper()
-        url = await _http_latest_build(root, device_evm, os_type)
-        return {"device": device, "os": os_type} if url else None
-
-    found = await asyncio.gather(*[
-        _probe(d, o) for d in device_entries for o in _KNOWN_OS_TYPES
-    ])
-    return [f for f in found if f is not None]
-
-
-# ---------------------------------------------------------------------------
-# Legacy single-variant mode
-# ---------------------------------------------------------------------------
-
-_LEGACY_URL: str | None = (
-    _os.environ.get("TI_PROCESSOR_SDK_DOCS_URL", "").rstrip("/") or None
-)
-_LEGACY_ROOT: Path | None = (
-    Path(_os.environ["TI_PROCESSOR_SDK_DOCS_ROOT"])
-    if "TI_PROCESSOR_SDK_DOCS_ROOT" in _os.environ else None
-)
-
-if _LEGACY_URL is not None:
-    try:
-        _check_url_host(_LEGACY_URL, "TI_PROCESSOR_SDK_DOCS_URL")
-    except ValueError as _exc:
-        sys.stderr.write(f"ERROR: {_exc}\n")
-        sys.exit(1)
-
-_LEGACY_KEY = ("__legacy__", "__legacy__", "__legacy__", False, "__legacy__")
-
-
 # ---------------------------------------------------------------------------
 # Per-variant lazy state
 # ---------------------------------------------------------------------------
+
+_MAX_INDEXES:           int = int(_os.environ.get("TI_PROCESSOR_SDK_MAX_INDEXES", "50"))
+_MAX_CONCURRENT_FETCHES: int = int(_os.environ.get("TI_PROCESSOR_SDK_MAX_CONCURRENT_FETCHES", "10"))
+_MAX_PAGES_PER_VARIANT: int = int(_os.environ.get("TI_PROCESSOR_SDK_MAX_PAGES_PER_VARIANT", "200"))
+
+_FETCH_SEMAPHORE = asyncio.Semaphore(_MAX_CONCURRENT_FETCHES)
 
 _INDEXES:      dict[tuple, dict[str, Any]] = {}
 _INDEX_LOCKS:  dict[tuple, asyncio.Lock]   = {}
 _PAGE_CACHES:  dict[tuple, dict[str, str]] = {}
 _INDEX_ERRORS: dict[tuple, str]            = {}
-_GLOBAL_LOCK:  asyncio.Lock | None = None
+_GLOBAL_LOCK   = asyncio.Lock()
 
-_MAX_INDEXES:            int = int(_os.environ.get("TI_PROCESSOR_SDK_MAX_INDEXES", "50"))
-_MAX_CONCURRENT_FETCHES: int = int(_os.environ.get("TI_PROCESSOR_SDK_MAX_CONCURRENT_FETCHES", "10"))
-_MAX_PAGES_PER_VARIANT:  int = int(_os.environ.get("TI_PROCESSOR_SDK_MAX_PAGES_PER_VARIANT", "200"))
-_FETCH_SEMAPHORE:        asyncio.Semaphore | None = None
-
-_FTS_DBS:            dict[tuple, sqlite3.Connection | None] = {}
-_FTS_DB_FILES:       dict[tuple, str]                       = {}
-_FTS_DB_LOCKS:       dict[tuple, asyncio.Lock]              = {}
-_FTS_DB_GLOBAL_LOCK: asyncio.Lock | None                    = None
-
-
-def _http_semaphore() -> asyncio.Semaphore:
-    global _FETCH_SEMAPHORE
-    if _FETCH_SEMAPHORE is None:
-        _FETCH_SEMAPHORE = asyncio.Semaphore(_MAX_CONCURRENT_FETCHES)
-    return _FETCH_SEMAPHORE
-
-
-def _global_lock() -> asyncio.Lock:
-    global _GLOBAL_LOCK
-    if _GLOBAL_LOCK is None:
-        _GLOBAL_LOCK = asyncio.Lock()
-    return _GLOBAL_LOCK
+_FTS_DBS:           dict[tuple, sqlite3.Connection | None] = {}
+_FTS_DB_FILES:      dict[tuple, str]                       = {}
+_FTS_DB_LOCKS:      dict[tuple, asyncio.Lock]              = {}
+_FTS_DB_GLOBAL_LOCK = asyncio.Lock()
+_FTS_SCHEMA_CACHE:  dict[int, bool]                        = {}  # id(conn) -> has page_type col
 
 
 def _cache_key(device: str, os_type: str, version: str, rt: bool, source: str) -> tuple:
@@ -807,15 +798,23 @@ def _cache_key(device: str, os_type: str, version: str, rt: bool, source: str) -
     return (device, os_type, version, rt, "software-dl")
 
 
-def _is_legacy_mode() -> bool:
-    return _LEGACY_URL is not None or _LEGACY_ROOT is not None
+async def _docs_location(
+    device: str, os_type: str, version: str, rt: bool, source: str
+) -> tuple[Path | None, str]:
+    """Return (local_root, base_url) for the given variant.
 
-
-def _fts_global_lock() -> asyncio.Lock:
-    global _FTS_DB_GLOBAL_LOCK
-    if _FTS_DB_GLOBAL_LOCK is None:
-        _FTS_DB_GLOBAL_LOCK = asyncio.Lock()
-    return _FTS_DB_GLOBAL_LOCK
+    local_root is non-None when docs are on local disk; base_url is the HTTP base otherwise.
+    Handles legacy mode, local nightly root, HTTP nightly root, and standard URLs.
+    """
+    if _is_legacy_mode():
+        return (_LEGACY_ROOT, _LEGACY_URL or "")
+    if source == "software-dl":
+        local = _resolve_local_docs(device, os_type, version)
+        if local is not None:
+            return (local, "")
+        url = await _resolve_http_docs(device, os_type, version)
+        return (None, url or _make_url(device, os_type, version, rt, source))
+    return (None, _make_url(device, os_type, version, rt, source))
 
 
 # ---------------------------------------------------------------------------
@@ -824,7 +823,7 @@ def _fts_global_lock() -> asyncio.Lock:
 
 async def _fetch_index_raw(base_url: str) -> str:
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        async with _http_semaphore():
+        async with _FETCH_SEMAPHORE:
             r = await client.get(f"{base_url}/searchindex.js")
         r.raise_for_status()
         return r.text
@@ -852,7 +851,7 @@ async def _ensure_index(
     if key in _INDEXES:
         return _INDEXES[key]
 
-    async with _global_lock():
+    async with _GLOBAL_LOCK:
         if key not in _INDEX_LOCKS:
             _INDEX_LOCKS[key] = asyncio.Lock()
 
@@ -863,27 +862,11 @@ async def _ensure_index(
             return _INDEXES[key]
 
         try:
-            if legacy:
-                if _LEGACY_ROOT is not None:
-                    raw = (_LEGACY_ROOT / "searchindex.js").read_text(encoding="utf-8")
-                else:
-                    raw = await _fetch_index_raw(_LEGACY_URL)
+            local, url = await _docs_location(device, os_type, version, rt, source)
+            if local is not None:
+                raw = (local / "searchindex.js").read_text(encoding="utf-8")
             else:
-                local_path = (
-                    _resolve_local_docs(device, os_type, version)
-                    if source == "software-dl" else None
-                )
-                http_base = (
-                    await _resolve_http_docs(device, os_type, version)
-                    if (source == "software-dl" and local_path is None) else None
-                )
-                if local_path is not None:
-                    raw = (local_path / "searchindex.js").read_text(encoding="utf-8")
-                elif http_base is not None:
-                    raw = await _fetch_index_raw(http_base)
-                else:
-                    raw = await _fetch_index_raw(_make_url(device, os_type, version, rt, source))
-
+                raw = await _fetch_index_raw(url)
             idx = _parse_index(raw)
 
         except httpx.HTTPStatusError as exc:
@@ -930,18 +913,18 @@ if _LEGACY_ROOT is not None:
 
 
 # ---------------------------------------------------------------------------
-# FTS5 SQLite index — per-variant BM25 search
+# FTS5 SQLite index -- BM25 search, falls back to Sphinx IDF when absent
 #
 # searchindex.db is built by scripts/build_searchindex.py and published
-# alongside searchindex.js.  When absent (old SDK versions), the search tool
-# falls back transparently to the Sphinx IDF scorer.
+# alongside searchindex.js. When absent (old SDK versions), search falls
+# back to the Sphinx IDF scorer below.
 # ---------------------------------------------------------------------------
 
 async def _download_fts_db(base_url: str) -> bytes | None:
     """Fetch searchindex.db from base_url. Returns None on 404 or network error."""
     try:
         async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-            async with _http_semaphore():
+            async with _FETCH_SEMAPHORE:
                 r = await client.get(f"{base_url}/searchindex.db")
         if r.status_code == 404:
             return None
@@ -956,12 +939,12 @@ async def _ensure_fts_db(
 ) -> sqlite3.Connection | None:
     """Return cached sqlite3 connection for the FTS index, or None if unavailable.
 
-    None is cached after a 404 to avoid re-probing on every search call.
+    None is cached after a 404/missing file to avoid re-probing on every search call.
     """
     if key in _FTS_DBS:
         return _FTS_DBS[key]
 
-    async with _fts_global_lock():
+    async with _FTS_DB_GLOBAL_LOCK:
         if key not in _FTS_DB_LOCKS:
             _FTS_DB_LOCKS[key] = asyncio.Lock()
 
@@ -969,26 +952,14 @@ async def _ensure_fts_db(
         if key in _FTS_DBS:
             return _FTS_DBS[key]
 
-        legacy = _is_legacy_mode()
-        data: bytes | None = None
-
-        if legacy:
-            if _LEGACY_ROOT is not None:
-                db_file = _LEGACY_ROOT / "searchindex.db"
-                data = db_file.read_bytes() if db_file.exists() else None
-            elif _LEGACY_URL is not None:
-                data = await _download_fts_db(_LEGACY_URL)
-        elif source == "software-dl":
-            local_path = _resolve_local_docs(device, os_type, version)
-            if local_path is not None:
-                db_file = local_path / "searchindex.db"
-                data = db_file.read_bytes() if db_file.exists() else None
-            else:
-                http_base = await _resolve_http_docs(device, os_type, version)
-                base_url = http_base if http_base is not None else _make_url(device, os_type, version, rt, source)
-                data = await _download_fts_db(base_url)
+        local, url = await _docs_location(device, os_type, version, rt, source)
+        if local is not None:
+            db_file = local / "searchindex.db"
+            data = db_file.read_bytes() if db_file.exists() else None
+        elif url:
+            data = await _download_fts_db(url)
         else:
-            data = await _download_fts_db(_make_url(device, os_type, version, rt, source))
+            data = None
 
         if data is None:
             _FTS_DBS[key] = None
@@ -999,6 +970,9 @@ async def _ensure_fts_db(
         Path(tmp_path).write_bytes(data)
         conn = sqlite3.connect(tmp_path, check_same_thread=False)
         _FTS_DB_FILES[key] = tmp_path
+        _FTS_SCHEMA_CACHE[id(conn)] = conn.execute(
+            "SELECT 1 FROM pragma_table_info('docs') WHERE name='page_type'"
+        ).fetchone() is not None
 
         # LRU: evict oldest real connection when at capacity
         real_count = sum(1 for v in _FTS_DBS.values() if v is not None)
@@ -1006,6 +980,7 @@ async def _ensure_fts_db(
             oldest = next(k for k, v in _FTS_DBS.items() if v is not None)
             old_conn = _FTS_DBS.pop(oldest)
             old_file = _FTS_DB_FILES.pop(oldest, None)
+            _FTS_SCHEMA_CACHE.pop(id(old_conn), None)
             old_conn.close()
             if old_file:
                 try:
@@ -1026,9 +1001,11 @@ def _fts_search(
 ) -> list[dict]:
     """BM25 FTS5 search: OR semantics, explicit column weights, matched_terms metadata."""
     fts_query = ' OR '.join(f'"{w}"' for w in expanded_words)
+    page_type_col = "d.page_type" if _FTS_SCHEMA_CACHE.get(id(conn)) else "NULL"
+
     try:
-        rows = conn.execute("""
-            SELECT d.docname, d.title, d.page_type, fts.rowid,
+        rows = conn.execute(f"""
+            SELECT d.docname, d.title, {page_type_col}, fts.rowid,
                    bm25(fts, 10.0, 5.0, 1.0) AS score
             FROM fts
             JOIN docs d ON fts.rowid = d.id
@@ -1037,24 +1014,11 @@ def _fts_search(
             LIMIT ?
         """, (fts_query, n)).fetchall()
     except sqlite3.OperationalError:
-        # page_type column absent (DB built without it) — retry without it
-        try:
-            rows = conn.execute("""
-                SELECT d.docname, d.title, NULL, fts.rowid,
-                       bm25(fts, 10.0, 5.0, 1.0) AS score
-                FROM fts
-                JOIN docs d ON fts.rowid = d.id
-                WHERE fts MATCH ?
-                ORDER BY score
-                LIMIT ?
-            """, (fts_query, n)).fetchall()
-        except sqlite3.OperationalError:
-            return []
+        return []
 
     if not rows:
         return []
 
-    # Per-term match: check which result rowids contain each base word
     term_rowids: dict[str, set[int]] = {}
     for word in base_words:
         try:
@@ -1089,7 +1053,7 @@ async def _fetch_http(base_url: str, path: str) -> str:
     """Fetch a doc page from base_url/path and return clean text."""
     try:
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            async with _http_semaphore():
+            async with _FETCH_SEMAPHORE:
                 r = await client.get(f"{base_url}/{path}")
             if r.status_code == 404:
                 return (
@@ -1104,36 +1068,6 @@ async def _fetch_http(base_url: str, path: str) -> str:
         return f"Network error fetching {path}: {exc}"
 
 
-async def _fetch_page(
-    path: str, device: str, os_type: str, version: str, rt: bool, source: str
-) -> str:
-    legacy = _is_legacy_mode()
-    key = _LEGACY_KEY if legacy else _cache_key(device, os_type, version, rt, source)
-    cache = _PAGE_CACHES.setdefault(key, {})
-
-    if path in cache:
-        return cache[path]
-
-    if legacy and _LEGACY_ROOT is not None:
-        text = _read_local_file(path, _LEGACY_ROOT)
-    elif source == "software-dl" and not legacy:
-        local_path = _resolve_local_docs(device, os_type, version)
-        if local_path is not None:
-            text = _read_local_file(path, local_path)
-        else:
-            http_base = await _resolve_http_docs(device, os_type, version)
-            base_url = http_base if http_base is not None else _make_url(device, os_type, version, rt, source)
-            text = await _fetch_http(base_url, path)
-    else:
-        base_url = _LEGACY_URL if (legacy and _LEGACY_URL) else _make_url(device, os_type, version, rt, source)
-        text = await _fetch_http(base_url, path)
-
-    if len(cache) >= _MAX_PAGES_PER_VARIANT:
-        del cache[next(iter(cache))]
-    cache[path] = text
-    return text
-
-
 def _read_local_file(path: str, root: Path) -> str:
     full = (root / path).resolve()
     if not str(full).startswith(str(root.resolve())):
@@ -1144,6 +1078,23 @@ def _read_local_file(path: str, root: Path) -> str:
             "Use ti_processor_sdk_docs_search to find valid paths."
         )
     return _html_to_text(full.read_text(encoding="utf-8", errors="replace"))
+
+
+async def _fetch_page(
+    path: str, device: str, os_type: str, version: str, rt: bool, source: str
+) -> str:
+    key = _LEGACY_KEY if _is_legacy_mode() else _cache_key(device, os_type, version, rt, source)
+    cache = _PAGE_CACHES.setdefault(key, {})
+    if path in cache:
+        return cache[path]
+
+    local, url = await _docs_location(device, os_type, version, rt, source)
+    text = _read_local_file(path, local) if local is not None else await _fetch_http(url, path)
+
+    if len(cache) >= _MAX_PAGES_PER_VARIANT:
+        del cache[next(iter(cache))]
+    cache[path] = text
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -1174,9 +1125,8 @@ def _html_to_text(html: str) -> str:
 
 def _node_to_lines(node: Any, lines: list[str]) -> None:
     if isinstance(node, NavigableString):
-        if t := str(node).rstrip():
-            if t.strip():
-                lines.append(t)
+        if str(node).strip():
+            lines.append(str(node).rstrip())
         return
     if not isinstance(node, Tag):
         return
@@ -1345,17 +1295,16 @@ async def ti_processor_sdk_docs_search(
         return json.dumps([])
     expanded_words = _expand_terms(base_words)
 
-    # Try FTS5 BM25 first; fall back to Sphinx IDF if searchindex.db absent
+    # FTS5 BM25 (primary) -- falls back to Sphinx IDF if searchindex.db absent
     key = _LEGACY_KEY if _is_legacy_mode() else _cache_key(device, os, version, rt, source)
     fts_conn = await _ensure_fts_db(key, device, os, version, rt, source)
-
     if fts_conn is not None:
         return json.dumps(
             _fts_search(fts_conn, base_words, expanded_words, max_results),
             indent=2,
         )
 
-    # Sphinx IDF fallback (searchindex.db absent — old SDK versions)
+    # Sphinx IDF fallback -- used when searchindex.db is absent (old SDK versions)
     docnames:   list[str]      = idx["docnames"]
     titles:     list[str]      = idx["titles"]
     terms:      dict[str, Any] = idx["terms"]
@@ -1366,15 +1315,14 @@ async def ti_processor_sdk_docs_search(
     for word in expanded_words:
         stemmed = _STEMMER.stemWord(word)
 
-        hits = terms.get(word) if terms.get(word) is not None else terms.get(stemmed)
+        hits = terms.get(word) if word in terms else terms.get(stemmed)
         if hits is not None:
             doc_list = _doc_indices(hits)
             idf = math.log((N + 1) / (len(doc_list) + 1)) + 1.0
             for doc_idx in doc_list:
                 scores[doc_idx] = scores.get(doc_idx, 0.0) + idf
 
-        title_hits = (titleterms.get(word) if titleterms.get(word) is not None
-                      else titleterms.get(stemmed))
+        title_hits = titleterms.get(word) if word in titleterms else titleterms.get(stemmed)
         if title_hits is not None:
             doc_list = _doc_indices(title_hits)
             idf = math.log((N + 1) / (len(doc_list) + 1)) + 1.0
