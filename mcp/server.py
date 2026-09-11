@@ -53,6 +53,8 @@ import math
 import os as _os
 import re
 import sys
+import sqlite3
+import tempfile
 import time
 
 from pathlib import Path
@@ -779,6 +781,11 @@ _MAX_CONCURRENT_FETCHES: int = int(_os.environ.get("TI_PROCESSOR_SDK_MAX_CONCURR
 _MAX_PAGES_PER_VARIANT:  int = int(_os.environ.get("TI_PROCESSOR_SDK_MAX_PAGES_PER_VARIANT", "200"))
 _FETCH_SEMAPHORE:        asyncio.Semaphore | None = None
 
+_FTS_DBS:            dict[tuple, sqlite3.Connection | None] = {}
+_FTS_DB_FILES:       dict[tuple, str]                       = {}
+_FTS_DB_LOCKS:       dict[tuple, asyncio.Lock]              = {}
+_FTS_DB_GLOBAL_LOCK: asyncio.Lock | None                    = None
+
 
 def _http_semaphore() -> asyncio.Semaphore:
     global _FETCH_SEMAPHORE
@@ -802,6 +809,13 @@ def _cache_key(device: str, os_type: str, version: str, rt: bool, source: str) -
 
 def _is_legacy_mode() -> bool:
     return _LEGACY_URL is not None or _LEGACY_ROOT is not None
+
+
+def _fts_global_lock() -> asyncio.Lock:
+    global _FTS_DB_GLOBAL_LOCK
+    if _FTS_DB_GLOBAL_LOCK is None:
+        _FTS_DB_GLOBAL_LOCK = asyncio.Lock()
+    return _FTS_DB_GLOBAL_LOCK
 
 
 # ---------------------------------------------------------------------------
@@ -913,6 +927,158 @@ if _LEGACY_ROOT is not None:
         sys.exit(1)
     _INDEXES[_LEGACY_KEY] = _parse_index(_si_path.read_text(encoding="utf-8"))
     _PAGE_CACHES[_LEGACY_KEY] = {}
+
+
+# ---------------------------------------------------------------------------
+# FTS5 SQLite index — per-variant BM25 search
+#
+# searchindex.db is built by scripts/build_searchindex.py and published
+# alongside searchindex.js.  When absent (old SDK versions), the search tool
+# falls back transparently to the Sphinx IDF scorer.
+# ---------------------------------------------------------------------------
+
+async def _download_fts_db(base_url: str) -> bytes | None:
+    """Fetch searchindex.db from base_url. Returns None on 404 or network error."""
+    try:
+        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+            async with _http_semaphore():
+                r = await client.get(f"{base_url}/searchindex.db")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.content
+    except (httpx.HTTPStatusError, httpx.RequestError):
+        return None
+
+
+async def _ensure_fts_db(
+    key: tuple, device: str, os_type: str, version: str, rt: bool, source: str
+) -> sqlite3.Connection | None:
+    """Return cached sqlite3 connection for the FTS index, or None if unavailable.
+
+    None is cached after a 404 to avoid re-probing on every search call.
+    """
+    if key in _FTS_DBS:
+        return _FTS_DBS[key]
+
+    async with _fts_global_lock():
+        if key not in _FTS_DB_LOCKS:
+            _FTS_DB_LOCKS[key] = asyncio.Lock()
+
+    async with _FTS_DB_LOCKS[key]:
+        if key in _FTS_DBS:
+            return _FTS_DBS[key]
+
+        legacy = _is_legacy_mode()
+        data: bytes | None = None
+
+        if legacy:
+            if _LEGACY_ROOT is not None:
+                db_file = _LEGACY_ROOT / "searchindex.db"
+                data = db_file.read_bytes() if db_file.exists() else None
+            elif _LEGACY_URL is not None:
+                data = await _download_fts_db(_LEGACY_URL)
+        elif source == "software-dl":
+            local_path = _resolve_local_docs(device, os_type, version)
+            if local_path is not None:
+                db_file = local_path / "searchindex.db"
+                data = db_file.read_bytes() if db_file.exists() else None
+            else:
+                http_base = await _resolve_http_docs(device, os_type, version)
+                base_url = http_base if http_base is not None else _make_url(device, os_type, version, rt, source)
+                data = await _download_fts_db(base_url)
+        else:
+            data = await _download_fts_db(_make_url(device, os_type, version, rt, source))
+
+        if data is None:
+            _FTS_DBS[key] = None
+            return None
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".db", prefix="ti-sdk-fts-")
+        _os.close(fd)
+        Path(tmp_path).write_bytes(data)
+        conn = sqlite3.connect(tmp_path, check_same_thread=False)
+        _FTS_DB_FILES[key] = tmp_path
+
+        # LRU: evict oldest real connection when at capacity
+        real_count = sum(1 for v in _FTS_DBS.values() if v is not None)
+        if real_count >= _MAX_INDEXES:
+            oldest = next(k for k, v in _FTS_DBS.items() if v is not None)
+            old_conn = _FTS_DBS.pop(oldest)
+            old_file = _FTS_DB_FILES.pop(oldest, None)
+            old_conn.close()
+            if old_file:
+                try:
+                    Path(old_file).unlink(missing_ok=True)
+                except OSError:
+                    pass
+            _FTS_DB_LOCKS.pop(oldest, None)
+
+        _FTS_DBS[key] = conn
+        return conn
+
+
+def _fts_search(
+    conn: sqlite3.Connection,
+    base_words: list[str],
+    expanded_words: list[str],
+    n: int,
+) -> list[dict]:
+    """BM25 FTS5 search: OR semantics, explicit column weights, matched_terms metadata."""
+    fts_query = ' OR '.join(f'"{w}"' for w in expanded_words)
+    try:
+        rows = conn.execute("""
+            SELECT d.docname, d.title, d.page_type, fts.rowid,
+                   bm25(fts, 10.0, 5.0, 1.0) AS score
+            FROM fts
+            JOIN docs d ON fts.rowid = d.id
+            WHERE fts MATCH ?
+            ORDER BY score
+            LIMIT ?
+        """, (fts_query, n)).fetchall()
+    except sqlite3.OperationalError:
+        # page_type column absent (DB built without it) — retry without it
+        try:
+            rows = conn.execute("""
+                SELECT d.docname, d.title, NULL, fts.rowid,
+                       bm25(fts, 10.0, 5.0, 1.0) AS score
+                FROM fts
+                JOIN docs d ON fts.rowid = d.id
+                WHERE fts MATCH ?
+                ORDER BY score
+                LIMIT ?
+            """, (fts_query, n)).fetchall()
+        except sqlite3.OperationalError:
+            return []
+
+    if not rows:
+        return []
+
+    # Per-term match: check which result rowids contain each base word
+    term_rowids: dict[str, set[int]] = {}
+    for word in base_words:
+        try:
+            hits = conn.execute(
+                "SELECT rowid FROM fts WHERE fts MATCH ?", (f'"{word}"',)
+            ).fetchall()
+            term_rowids[word] = {r[0] for r in hits}
+        except sqlite3.OperationalError:
+            term_rowids[word] = set()
+
+    results = []
+    for docname, title, page_type, rowid, bm25_score in rows:
+        matched = sorted(w for w, rids in term_rowids.items() if rowid in rids)
+        coverage = round(len(matched) / len(base_words), 2) if base_words else 0.0
+        clean_title = re.sub(r'<[^>]+>', '', title or '').strip() or docname.split('/')[-1]
+        results.append({
+            "title": clean_title,
+            "path": docname + ".html",
+            "page_type": page_type or "other",
+            "score": round(-bm25_score, 3),
+            "matched_terms": matched,
+            "coverage": coverage,
+        })
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -1158,6 +1324,7 @@ async def ti_processor_sdk_docs_search(
 
     Returns:
         JSON array sorted by relevance. Each entry: title, path, score.
+        When FTS5 index available: also includes page_type, matched_terms, coverage.
         Pass path to ti_processor_sdk_docs_read to get full content.
     """
     err = _validate(device=device, os_type=os, version=version, source=source, query=query)
@@ -1173,23 +1340,32 @@ async def ti_processor_sdk_docs_search(
     except VariantNotFoundError as exc:
         return str(exc)
 
+    base_words = list(dict.fromkeys(re.findall(r"[a-z][a-z0-9]*", query.lower())))[:_MAX_SEARCH_TERMS]
+    if not base_words:
+        return json.dumps([])
+    expanded_words = _expand_terms(base_words)
+
+    # Try FTS5 BM25 first; fall back to Sphinx IDF if searchindex.db absent
+    key = _LEGACY_KEY if _is_legacy_mode() else _cache_key(device, os, version, rt, source)
+    fts_conn = await _ensure_fts_db(key, device, os, version, rt, source)
+
+    if fts_conn is not None:
+        return json.dumps(
+            _fts_search(fts_conn, base_words, expanded_words, max_results),
+            indent=2,
+        )
+
+    # Sphinx IDF fallback (searchindex.db absent — old SDK versions)
     docnames:   list[str]      = idx["docnames"]
     titles:     list[str]      = idx["titles"]
     terms:      dict[str, Any] = idx["terms"]
     titleterms: dict[str, Any] = idx.get("titleterms", {})
     N = len(docnames)
 
-    base_words = list(dict.fromkeys(re.findall(r"[a-z][a-z0-9]*", query.lower())))[:_MAX_SEARCH_TERMS]
-    if not base_words:
-        return json.dumps([])
-    words = _expand_terms(base_words)
-
     scores: dict[int, float] = {}
-
-    for word in words:
+    for word in expanded_words:
         stemmed = _STEMMER.stemWord(word)
 
-        # body terms — IDF-weighted; try raw then stemmed
         hits = terms.get(word) if terms.get(word) is not None else terms.get(stemmed)
         if hits is not None:
             doc_list = _doc_indices(hits)
@@ -1197,7 +1373,6 @@ async def ti_processor_sdk_docs_search(
             for doc_idx in doc_list:
                 scores[doc_idx] = scores.get(doc_idx, 0.0) + idf
 
-        # title terms — IDF-weighted with 3x boost; try raw then stemmed
         title_hits = (titleterms.get(word) if titleterms.get(word) is not None
                       else titleterms.get(stemmed))
         if title_hits is not None:
@@ -1208,7 +1383,9 @@ async def ti_processor_sdk_docs_search(
 
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:max_results]
     return json.dumps([
-        {"title": titles[i], "path": docnames[i] + ".html", "score": round(s, 3)}
+        {"title": re.sub(r'<[^>]+>', '', titles[i]).strip(),
+         "path": docnames[i] + ".html",
+         "score": round(s, 3)}
         for i, s in ranked
     ], indent=2)
 
