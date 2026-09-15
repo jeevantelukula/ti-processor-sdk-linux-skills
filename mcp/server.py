@@ -82,7 +82,7 @@ _DEVICE_RE          = re.compile(r'^[A-Z][A-Z0-9]{1,19}$')
 _OS_RE              = re.compile(r'^[a-z][a-z0-9]{0,19}$')
 _VERSION_RE         = re.compile(r'^(latest|\d{1,4}(_\d{1,4}){2,5})$')
 _SHORT_VER_RE       = re.compile(r'^\d{1,2}\.\d{1,2}(\.\d{1,4})*$')
-_PATH_SAFE_RE       = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_/.\-]*$')
+_PATH_SAFE_RE       = re.compile(r'^[a-zA-Z0-9_.][a-zA-Z0-9_/.\-]*$')
 _MAX_QUERY_LEN      = 500
 _MAX_PATH_LEN       = 300
 _MAX_SEARCH_RESULTS = 20
@@ -201,6 +201,28 @@ def _parse_os_patterns() -> None:
 
 
 _parse_os_patterns()
+
+
+# ---------------------------------------------------------------------------
+# Asset MIME types
+# ---------------------------------------------------------------------------
+
+_ASSET_MIME_MAP = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "svg": "image/svg+xml",
+    "gif": "image/gif",
+    "pdf": "application/pdf",
+}
+
+
+def _mime_from_asset_path(path: str) -> str:
+    """Return a MIME type based on file extension, default to octet-stream."""
+    if not path or "." not in path:
+        return "application/octet-stream"
+    ext = path.lower().rsplit(".", 1)[-1]
+    return _ASSET_MIME_MAP.get(ext, "application/octet-stream")
 
 
 def _software_dl_url(device: str, os_type: str, version: str, rt: bool) -> str:
@@ -785,6 +807,11 @@ _PAGE_CACHES:  dict[tuple, dict[str, str]] = {}
 _INDEX_ERRORS: dict[tuple, str]            = {}
 _GLOBAL_LOCK   = asyncio.Lock()
 
+# Asset cache (LRU) for get_asset tool
+_ASSET_CACHE: dict[tuple, tuple[bytes, str, int]] = {}
+_ASSET_CACHE_KEYS: list[tuple] = []
+_ASSET_CACHE_MAX: int = int(_os.environ.get("TI_PROCESSOR_SDK_MAX_ASSETS_PER_VARIANT", "200"))
+
 _FTS_DBS:           dict[tuple, sqlite3.Connection | None] = {}
 _FTS_DB_FILES:      dict[tuple, str]                       = {}
 _FTS_DB_LOCKS:      dict[tuple, asyncio.Lock]              = {}
@@ -1046,7 +1073,7 @@ def _fts_search(
 
 
 # ---------------------------------------------------------------------------
-# Page fetching
+# Page fetching (clean text)
 # ---------------------------------------------------------------------------
 
 async def _fetch_http(base_url: str, path: str) -> str:
@@ -1078,6 +1105,42 @@ def _read_local_file(path: str, root: Path) -> str:
             "Use ti_processor_sdk_docs_search to find valid paths."
         )
     return _html_to_text(full.read_text(encoding="utf-8", errors="replace"))
+
+
+# ---------------------------------------------------------------------------
+# Raw fetching (for asset listing)
+# ---------------------------------------------------------------------------
+
+async def _fetch_http_raw(base_url: str, path: str) -> str:
+    """Fetch a doc page from base_url/path and return raw HTML (not cleaned)."""
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            async with _FETCH_SEMAPHORE:
+                r = await client.get(f"{base_url}/{path}")
+            if r.status_code == 404:
+                return (
+                    f"Page not found: {path}\n"
+                    "Use ti_processor_sdk_docs_search to find valid paths."
+                )
+            r.raise_for_status()
+            return r.text   # raw, not cleaned
+    except httpx.HTTPStatusError as exc:
+        return f"HTTP {exc.response.status_code} error fetching {path}: {exc.response.reason_phrase}"
+    except httpx.RequestError as exc:
+        return f"Network error fetching {path}: {exc}"
+
+
+def _read_local_file_raw(path: str, root: Path) -> str:
+    """Read a local file and return raw string (not cleaned)."""
+    full = (root / path).resolve()
+    if not str(full).startswith(str(root.resolve())):
+        return "Error: path outside docs root"
+    if not full.exists():
+        return (
+            f"Page not found: {path}\n"
+            "Use ti_processor_sdk_docs_search to find valid paths."
+        )
+    return full.read_text(encoding="utf-8", errors="replace")
 
 
 async def _fetch_page(
@@ -1378,6 +1441,192 @@ async def ti_processor_sdk_docs_read(
     except VariantNotFoundError as exc:
         return str(exc)
     return await _fetch_page(path, device, os, version, rt, source)
+
+
+# ---------------------------------------------------------------------------
+# Asset tools
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def ti_processor_sdk_docs_get_asset(
+    asset_path: str,
+    device: str = _DEFAULT_DEVICE,
+    os: str = _DEFAULT_OS,
+    version: str = "latest",
+    source: str = "software-dl",
+) -> str:
+    """Fetch a raw asset (image, diagram, SVG, PDF, etc.) from the documentation source.
+
+    Args:
+        asset_path: Path to the asset relative to the documentation root.
+                    Must not contain '..' or absolute paths – validated like `path` in read/search.
+        device: Target device family (e.g. "AM62X").
+        os: OS type: "linux", "debian", or "buildroot".
+        version: SDK version ("latest", full string like "12_01_00_05_03", or short alias like "12.01").
+        source: "software-dl" (default, versioned) or "github" (latest master only).
+
+    Returns:
+        JSON string with fields:
+          - data: base64-encoded asset bytes
+          - mimeType: MIME type (e.g. "image/png", "image/svg+xml", "application/pdf")
+          - size: size in bytes of the original asset
+    On error returns an error string (same convention as other tools).
+    """
+    # Validate inputs (reuse _validate for device, os, version, source, and asset_path as path)
+    err = _validate(device=device, os_type=os, version=version, source=source, path=asset_path)
+    if err:
+        return err
+
+    # Resolve version (only for software-dl)
+    if source == "software-dl":
+        version, ver_err = await _resolve_version(device, version)
+        if ver_err:
+            return ver_err
+
+    # Get location (local root or base URL)
+    local, url = await _docs_location(device, os, version, rt=False, source=source)
+
+    # Check asset cache
+    cache_key = (device, os, version, source, asset_path)
+    if cache_key in _ASSET_CACHE:
+        # Return cached result to avoid re-encoding
+        return _ASSET_CACHE[cache_key]
+
+    # Fetch raw bytes
+    try:
+        if local is not None:
+            asset_file = local / asset_path
+            if not asset_file.is_file():
+                return f"Asset not found: {asset_path}"
+            data = asset_file.read_bytes()
+        elif url is not None:
+            asset_url = url.rstrip('/') + '/' + asset_path.lstrip('/')
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                async with _FETCH_SEMAPHORE:
+                    r = await client.get(asset_url)
+                if r.status_code == 404:
+                    return f"Asset not found: {asset_path}"
+                r.raise_for_status()
+                data = r.content
+        else:
+            return "Variant not found"
+    except Exception as e:
+        return f"Failed to fetch asset: {str(e)}"
+
+    # Encode and get MIME type
+    import base64
+    b64 = base64.b64encode(data).decode("ascii")
+    mime = _mime_from_asset_path(asset_path)
+    size = len(data)
+
+    # Build result JSON
+    result_json = json.dumps({"data": b64, "mimeType": mime, "size": size})
+
+    # Cache with LRU eviction
+    if cache_key in _ASSET_CACHE:
+        _ASSET_CACHE_KEYS.remove(cache_key)
+    elif len(_ASSET_CACHE) >= _ASSET_CACHE_MAX:
+        old = _ASSET_CACHE_KEYS.pop(0)
+        del _ASSET_CACHE[old]
+    _ASSET_CACHE[cache_key] = result_json
+    _ASSET_CACHE_KEYS.append(cache_key)
+
+    return result_json
+
+
+@mcp.tool()
+async def ti_processor_sdk_docs_list_page_assets(
+    path: str,
+    device: str = _DEFAULT_DEVICE,
+    os: str = _DEFAULT_OS,
+    version: str = "latest",
+    source: str = "software-dl",
+) -> str:
+    """List all assets (images, diagrams, etc.) referenced in a documentation page.
+
+    Args:
+        path: Relative HTML path from ti_processor_sdk_docs_search
+              (e.g. "linux/Foundational_Components/Tools/Flash_via_Fastboot.html").
+              .html extension optional.
+        device: Target device family (e.g. "AM62X").
+        os: OS type: "linux", "debian", or "buildroot".
+        version: SDK version ("latest", full string like "12_01_00_05_03", or short alias like "12.01").
+        source: "software-dl" (default, versioned) or "github" (latest master only).
+
+    Returns:
+        JSON array of objects, each with:
+          - path: asset path relative to documentation root
+          - mimeType: MIME type (e.g. "image/png", "image/svg+xml")
+    On error returns an error string (same convention as other tools).
+    """
+    # Validate inputs
+    err = _validate(device=device, os_type=os, version=version, source=source, path=path)
+    if err:
+        return err
+
+    # Resolve version (only for software-dl)
+    if source == "software-dl":
+        version, ver_err = await _resolve_version(device, version)
+        if ver_err:
+            return ver_err
+
+    # Get location (local root or base URL)
+    local, url = await _docs_location(device, os, version, rt=False, source=source)
+
+    # Fetch raw HTML
+    try:
+        async with _FETCH_SEMAPHORE:
+            if local is not None:
+                html = _read_local_file_raw(path, local)
+            elif url is not None:
+                html = await _fetch_http_raw(url + path)
+            else:
+                return "Variant not found"
+    except Exception as e:
+        return f"Failed to fetch page: {str(e)}"
+
+    # Parse HTML to find assets
+    from bs4 import BeautifulSoup
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+    except Exception as e:
+        return f"Failed to parse HTML: {str(e)}"
+
+    # Find tags that can reference external assets
+    asset_tags = soup.find_all(['img', 'object', 'embed', 'source', 'audio', 'video'])
+    assets = []
+
+    for tag in asset_tags:
+        src = None
+        if tag.name == 'img':
+            src = tag.get('src')
+        elif tag.name in ('object', 'embed'):
+            src = tag.get('data') or tag.get('src')
+        elif tag.name == 'source':
+            src = tag.get('src')
+        elif tag.name in ('audio', 'video'):
+            src = tag.get('src')
+            # Also check for poster attribute in video
+            if tag.name == 'video' and not src:
+                src = tag.get('poster')
+
+        if src and isinstance(src, str) and src.strip():
+            src = src.strip()
+            # Normalize path: remove leading ./ and collapse ../
+            # For simplicity, we keep the path as-is and document that it's relative to docs root
+            # (same convention as the path field from search/read)
+            mime = _mime_from_asset_path(src)
+            assets.append({"path": src, "mimeType": mime})
+
+    # Deduplicate by path
+    seen = set()
+    unique_assets = []
+    for asset in assets:
+        if asset["path"] not in seen:
+            seen.add(asset["path"])
+            unique_assets.append(asset)
+
+    return json.dumps(unique_assets)
 
 
 # ---------------------------------------------------------------------------
