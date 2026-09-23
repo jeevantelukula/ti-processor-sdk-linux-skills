@@ -1,0 +1,16 @@
+.git
+*.md
+*.txt
+!requirements.txt
+*.json
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.DS_Store
+tests/
+test_*.py
+*.log
+.dockerignore
+Dockerfile
+README.md

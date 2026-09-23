@@ -11,11 +11,16 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server.py .
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
 
 ENV TI_PROCESSOR_SDK_DEFAULT_DEVICE=AM62X
 ENV TI_PROCESSOR_SDK_DEFAULT_OS=linux
 ENV TI_PROCESSOR_SDK_MCP_PORT=7471
 
 EXPOSE 7471
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:7471/mcp', timeout=2)" || exit 1
 
 CMD ["python3", "server.py", "--http", "7471"]

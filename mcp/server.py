@@ -47,6 +47,16 @@ TI_PROCESSOR_SDK_DOCS_URL               base URL -- locks tools to this URL
 TI_PROCESSOR_SDK_DOCS_ROOT              local path -- locks tools to this path
 """
 
+import logging
+import sys
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger("ti-sdk-mcp")
+
 import argparse
 import asyncio
 import atexit
@@ -189,7 +199,7 @@ def _parse_os_patterns() -> None:
             continue
         parts = entry.split(":")
         if len(parts) != 4:
-            sys.stderr.write(
+            logger.info(
                 f"Warning: TI_PROCESSOR_SDK_OS_PATTERNS entry {entry!r} invalid -- "
                 "expected os:prefix:version_suffix:latest_dir, skipping.\n"
             )
@@ -198,7 +208,7 @@ def _parse_os_patterns() -> None:
         _OS_PREFIX[os_name] = prefix
         _OS_SUFFIX[os_name] = suffix
         _OS_LATEST[os_name] = latest
-        sys.stderr.write(
+        logger.info(
             f"OS pattern override: {os_name} -> "
             f"prefix={prefix!r} suffix={suffix!r} latest={latest!r}\n"
         )
@@ -240,7 +250,7 @@ def _asset_category(path_str: str, mime: str) -> str:
 
 def _software_dl_url(device: str, os_type: str, version: str, rt: bool) -> str:
     if os_type not in _OS_PREFIX:
-        sys.stderr.write(
+        logger.info(
             f"Warning: unknown OS type '{os_type}' -- falling back to processor-sdk-linux. "
             f"Set TI_PROCESSOR_SDK_OS_PATTERNS to add '{os_type}' without editing server.py.\n"
         )
@@ -374,7 +384,7 @@ if _HTTP_DOCS_ROOT is not None:
     try:
         _check_url_host(_HTTP_DOCS_ROOT, "TI_PROCESSOR_SDK_DOCS_HTTP_ROOT")
     except ValueError as _exc:
-        sys.stderr.write(f"ERROR: {_exc}\n")
+        logger.info(f"ERROR: {_exc}\n")
         sys.exit(1)
 
 _AUTOINDEX_HREF_RE = re.compile(r'href="([^"?/][^"]*?/)"')
@@ -489,7 +499,7 @@ if _LEGACY_URL is not None:
     try:
         _check_url_host(_LEGACY_URL, "TI_PROCESSOR_SDK_DOCS_URL")
     except ValueError as _exc:
-        sys.stderr.write(f"ERROR: {_exc}\n")
+        logger.info(f"ERROR: {_exc}\n")
         sys.exit(1)
 
 _LEGACY_KEY = ("__legacy__", "__legacy__", "__legacy__", False, "__legacy__")
@@ -555,7 +565,7 @@ async def _catalog_from_github() -> list[dict[str, str]]:
     data = r.json()
 
     if data.get("truncated"):
-        sys.stderr.write(
+        logger.info(
             "Warning: GitHub tree response truncated -- catalog may be incomplete.\n"
             "  Set TI_PROCESSOR_SDK_DOC_CONFIGS=/path/to/processor-sdk-doc/configs for complete catalog.\n"
         )
@@ -596,16 +606,16 @@ async def _ensure_catalog() -> list[dict[str, str]]:
             return _CATALOG
         if _LOCAL_DOCS_ROOT is not None:
             _CATALOG = _catalog_from_local_root(_LOCAL_DOCS_ROOT)
-            sys.stderr.write(f"Catalog: {len(_CATALOG)} variants (local root {_LOCAL_DOCS_ROOT})\n")
+            logger.info(f"Catalog: {len(_CATALOG)} variants (local root {_LOCAL_DOCS_ROOT})\n")
         elif _HTTP_DOCS_ROOT is not None:
             _CATALOG = await _catalog_from_http_root(_HTTP_DOCS_ROOT)
-            sys.stderr.write(f"Catalog: {len(_CATALOG)} variants (HTTP root {_HTTP_DOCS_ROOT})\n")
+            logger.info(f"Catalog: {len(_CATALOG)} variants (HTTP root {_HTTP_DOCS_ROOT})\n")
         elif _LOCAL_CONFIGS is not None:
             _CATALOG = _catalog_from_local(_LOCAL_CONFIGS)
-            sys.stderr.write(f"Catalog: {len(_CATALOG)} variants (local configs {_LOCAL_CONFIGS})\n")
+            logger.info(f"Catalog: {len(_CATALOG)} variants (local configs {_LOCAL_CONFIGS})\n")
         else:
             _CATALOG = await _catalog_from_github()
-            sys.stderr.write(f"Catalog: {len(_CATALOG)} variants (GitHub)\n")
+            logger.info(f"Catalog: {len(_CATALOG)} variants (GitHub)\n")
         _CATALOG_LOADED_AT = time.monotonic()
         return _CATALOG
 
@@ -766,7 +776,7 @@ async def _fetch_ti_versions(device: str) -> list[dict]:
                             "label":   v.get("label", ver_dot),
                         })
         except Exception as exc:
-            sys.stderr.write(f"Warning: version fetch failed for {device}: {exc}\n")
+            logger.info(f"Warning: version fetch failed for {device}: {exc}\n")
             versions = []
 
         _TI_VERSIONS_CACHE[device] = (time.monotonic(), versions)
@@ -956,7 +966,7 @@ async def _ensure_index(
 if _LEGACY_ROOT is not None:
     _si_path = _LEGACY_ROOT / "searchindex.js"
     if not _si_path.exists():
-        sys.stderr.write(f"ERROR: searchindex.js not found at {_si_path}\n")
+        logger.info(f"ERROR: searchindex.js not found at {_si_path}\n")
         sys.exit(1)
     _INDEXES[_LEGACY_KEY] = _parse_index(_si_path.read_text(encoding="utf-8"))
     _PAGE_CACHES[_LEGACY_KEY] = {}
@@ -1273,6 +1283,12 @@ mcp = FastMCP(
     host="0.0.0.0",
     port=_HTTP_PORT,
 )
+
+
+@mcp.tool()
+async def health() -> str:
+    """Health check endpoint for orchestration."""
+    return "{\"status\": \"healthy\", \"service\": \"ti-processor-sdk-docs\"}"
 
 
 @mcp.tool()
@@ -1795,8 +1811,8 @@ if __name__ == "__main__":
     if args.http:
         port = args.http
         mcp.settings.port = port
-        sys.stderr.write(f"TI Processor SDK Docs MCP -- HTTP mode, port {port}\n")
-        sys.stderr.write(
+        logger.info(f"TI Processor SDK Docs MCP -- HTTP mode, port {port}\n")
+        logger.info(
             f"Register: claude mcp add --transport http ti-processor-sdk-docs "
             f"http://localhost:{port}/mcp\n"
         )
