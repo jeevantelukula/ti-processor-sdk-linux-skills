@@ -3,11 +3,13 @@
 Lets Claude Code (and any MCP-compatible AI agent) search and read
 TI Processor SDK Linux documentation — without loading full HTML pages into context.
 
-Four tools:
+Six tools:
 - **`ti_processor_sdk_docs_list_variants`** — list all supported (device, OS) combos
 - **`ti_processor_sdk_docs_list_versions`** — list available SDK versions for a device (auto-discovered from ti.com)
 - **`ti_processor_sdk_docs_search`** — keyword search → ranked list of relevant pages
 - **`ti_processor_sdk_docs_read`** — read a specific page as clean text (navigation stripped)
+- **`ti_processor_sdk_docs_list_assets`** — list all images/diagrams on a page with semantic context (heading, caption, surrounding text, DOT source for Graphviz diagrams)
+- **`ti_processor_sdk_docs_get_asset`** — fetch an asset (image, SVG, PDF) as base64-encoded bytes
 
 Supports all devices (AM62X, AM64X, AM62PX, J721E, ...), all OS types (linux, debian, buildroot),
 and historical versions from software-dl.ti.com.
@@ -101,7 +103,7 @@ Uses the Sphinx HTML build on disk. Fast, no network dependency.
 
 **Install dependencies:**
 ```bash
-pip3 install "mcp>=1.0,<2" beautifulsoup4 httpx uvicorn
+pip3 install "mcp>=1.0,<2" beautifulsoup4 httpx uvicorn snowballstemmer
 ```
 
 **Register with Claude Code:**
@@ -221,6 +223,109 @@ ti_processor_sdk_docs_read(
 
 ---
 
+### `ti_processor_sdk_docs_list_assets`
+
+List all images and diagrams on a documentation page with semantic context extracted from the surrounding HTML. Works for multimodal agents (vision) and text-only agents alike.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `path` | required | Relative HTML path from search results |
+| `device` | `AM62X` | Device family |
+| `os` | `linux` | `linux`, `debian`, or `buildroot` |
+| `version` | `latest` | SDK version |
+| `source` | `software-dl` | `software-dl` or `github` |
+| `content_only` | `true` | `true` = filter out `_static/` UI chrome (logos, icons). `false` = include everything |
+
+**Result structure:**
+```json
+{
+  "assets": [
+    {
+      "path": "_images/GPIO_driver_diagram.png",
+      "mimeType": "image/png",
+      "category": "diagram",
+      "section_heading": "GPIO",
+      "caption": null,
+      "context_text": "The GPIO controllers allow interaction with GPIO pins..."
+    },
+    {
+      "path": "_images/graphviz-724b61dc.svg",
+      "mimeType": "image/svg+xml",
+      "category": "diagram",
+      "section_heading": "Buildroot Architecture for TI Devices",
+      "caption": "Fig. 1.1 Buildroot-based Linux Architecture for TI Devices",
+      "context_text": "Each component in the diagram below is a clickable hyperlink...",
+      "dot_source": "digraph buildroot_architecture { rankdir=TB; ... }"
+    }
+  ],
+  "metadata": {
+    "page_title": "GPIO — Processor SDK AM62x Documentation",
+    "asset_count": 3,
+    "static_filtered": 1,
+    "total_tags_found": 45,
+    "image_tags_found": 4,
+    "skipped_assets": 0,
+    "status": "success",
+    "warnings": []
+  }
+}
+```
+
+**Asset fields:**
+
+| Field | Always present | Description |
+|---|---|---|
+| `path` | yes | Relative path from doc root — pass directly to `get_asset` |
+| `mimeType` | yes | MIME type (`image/png`, `image/svg+xml`, etc.) |
+| `category` | yes | `diagram`, `image`, `photo`, or `document` |
+| `section_heading` | when found | Nearest `h1`–`h4` heading before the asset |
+| `caption` | when found | `<figcaption>` text if asset is inside a `<figure>` |
+| `context_text` | when found | First 150 chars of preceding paragraph — for text-only agents |
+| `dot_source` | Graphviz only | Full DOT graph source from `<object class="graphviz">` — lets text-only agents read the full architecture topology |
+
+**Example:**
+```
+ti_processor_sdk_docs_list_assets(
+    "buildroot/Overview.html",
+    device="AM62X", os="buildroot", version="latest"
+)
+```
+
+---
+
+### `ti_processor_sdk_docs_get_asset`
+
+Fetch a binary asset (image, SVG, PDF) as base64-encoded bytes. Use `list_assets` first to discover asset paths.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `asset_path` | required | Relative path from doc root (e.g. `_images/GPIO_driver_diagram.png`) |
+| `device` | `AM62X` | Must match device used in `list_assets` |
+| `os` | `linux` | Must match OS used in `list_assets` |
+| `version` | `latest` | Must match version used in `list_assets` |
+| `source` | `software-dl` | Must match source used in `list_assets` |
+
+**Result — always returns inline base64:**
+```json
+{
+  "data": "<base64-encoded bytes>",
+  "mimeType": "image/png",
+  "size": 22751
+}
+```
+
+The agent must decode the base64 to view the image. No URL fallback is provided — large assets are also returned as base64. Assets larger than `TI_PROCESSOR_SDK_MAX_ASSET_BYTES` (default 20 MB) are rejected before download.
+
+**Example:**
+```
+ti_processor_sdk_docs_get_asset(
+    "_images/GPIO_driver_diagram.png",
+    device="AM62X", os="linux", version="latest"
+)
+```
+
+---
+
 ## How it works
 
 1. **First call for a variant:** Fetches `searchindex.js` (~300 KB) from software-dl.ti.com.
@@ -257,6 +362,8 @@ ti_processor_sdk_docs_read(
 | `TI_PROCESSOR_SDK_MAX_INDEXES` | `50` | Max variants held in memory. Oldest evicted when exceeded |
 | `TI_PROCESSOR_SDK_MAX_CONCURRENT_FETCHES` | `10` | Max simultaneous HTTP fetches |
 | `TI_PROCESSOR_SDK_MAX_PAGES_PER_VARIANT` | `200` | Max pages cached per variant |
+| `TI_PROCESSOR_SDK_MAX_ASSETS_PER_VARIANT` | `200` | Max assets cached in the get_asset LRU cache |
+| `TI_PROCESSOR_SDK_MAX_ASSET_BYTES` | `20971520` | Max asset size (bytes) for get_asset — requests over this limit are rejected before download |
 | `TI_PROCESSOR_SDK_DOCS_LOCAL_ROOT` | — | Staging/internal mode: path to nightly build root on disk. Structure: `{root}/{device}-evm/{build_id}_{date}/processor-sdk-{os}-docs/`. "latest" = highest build ID |
 | `TI_PROCESSOR_SDK_DOCS_HTTP_ROOT` | — | Staging/internal mode: base URL of HTTP-served build root. Same directory structure as LOCAL_ROOT. Autoindex must be enabled. SSRF-checked at startup |
 | `GITHUB_TOKEN` | — | GitHub PAT. Raises catalog API rate limit from 60 to 5000 req/hr |

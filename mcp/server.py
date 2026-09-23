@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """TI Processor SDK Documentation MCP Server.
 
-Four tools:
+Six tools:
   ti_processor_sdk_docs_list_variants  — list all supported (device, OS) combos
   ti_processor_sdk_docs_list_versions  — list available SDK versions for a device (from ti.com)
   ti_processor_sdk_docs_search         — keyword search scoped to a specific variant
   ti_processor_sdk_docs_read           — read a doc page as clean text
+  ti_processor_sdk_docs_list_assets — list all images/diagrams on a page with semantic context
+  ti_processor_sdk_docs_get_asset      — fetch an asset as base64-encoded bytes
 
 --- SOURCES ---
 software-dl (default):  https://software-dl.ti.com/...  versioned + latest symlinks
@@ -47,6 +49,8 @@ TI_PROCESSOR_SDK_DOCS_ROOT              local path -- locks tools to this path
 
 import argparse
 import asyncio
+import atexit
+import base64
 import html as _html
 import json
 import math
@@ -56,10 +60,10 @@ import sqlite3
 import sys
 import tempfile
 import time
-
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin as _urljoin
 
 import httpx
 import snowballstemmer as _snowball
@@ -134,11 +138,11 @@ def _validate(
     if path is not None:
         if len(path) > _MAX_PATH_LEN:
             return f"Path too long: max {_MAX_PATH_LEN} characters."
+        # Disallow absolute paths
+        if path.startswith('/'):
+            return "Invalid path: absolute paths are not allowed."
         norm = path.replace("\\", "/")
-        if ".." in norm.split("/"):
-            return "Invalid path: '..' (path traversal) is not allowed."
-        check = norm[:-5] if norm.endswith(".html") else norm
-        if check and not _PATH_SAFE_RE.match(check):
+        if not _PATH_SAFE_RE.match(norm):
             return f"Invalid path {path!r}: only alphanumeric, '/', '_', '-', '.' allowed."
     if query is not None and len(query) > _MAX_QUERY_LEN:
         return f"Query too long: max {_MAX_QUERY_LEN} characters."
@@ -207,22 +211,31 @@ _parse_os_patterns()
 # Asset MIME types
 # ---------------------------------------------------------------------------
 
-_ASSET_MIME_MAP = {
-    "png": "image/png",
-    "jpg": "image/jpeg",
-    "jpeg": "image/jpeg",
-    "svg": "image/svg+xml",
-    "gif": "image/gif",
-    "pdf": "application/pdf",
-}
+import mimetypes
 
 
 def _mime_from_asset_path(path: str) -> str:
-    """Return a MIME type based on file extension, default to octet-stream."""
-    if not path or "." not in path:
+    """Return a MIME type based on file extension using standard library."""
+    if not path:
         return "application/octet-stream"
-    ext = path.lower().rsplit(".", 1)[-1]
-    return _ASSET_MIME_MAP.get(ext, "application/octet-stream")
+    mime_type, _ = mimetypes.guess_type(path)
+    return mime_type or "application/octet-stream"
+
+
+def _asset_category(path_str: str, mime: str) -> str:
+    """Return a content-type category hint for an asset."""
+    if mime == "image/svg+xml":
+        return "diagram"
+    if mime in ("image/jpeg",):
+        return "photo"
+    if mime == "application/pdf":
+        return "document"
+    name = path_str.lower()
+    diagram_kw = ("diagram", "arch", "flow", "block", "schematic", "chart",
+                  "layout", "overview", "topology", "bsp")
+    if any(kw in name for kw in diagram_kw):
+        return "diagram"
+    return "image"
 
 
 def _software_dl_url(device: str, os_type: str, version: str, rt: bool) -> str:
@@ -375,12 +388,11 @@ _HTTP_DOCS_CACHE_LOCK  = asyncio.Lock()
 async def _http_list_dir(url: str) -> list[str]:
     """Fetch autoindex page and return list of directory entry names."""
     try:
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            async with _FETCH_SEMAPHORE:
-                r = await client.get(url.rstrip("/") + "/")
-            if r.status_code != 200:
-                return []
-            return _AUTOINDEX_HREF_RE.findall(r.text)
+        async with _FETCH_SEMAPHORE:
+            r = await _HTTP_CLIENT.get(url.rstrip("/") + "/", timeout=15)
+        if r.status_code != 200:
+            return []
+        return _AUTOINDEX_HREF_RE.findall(r.text)
     except httpx.RequestError:
         return []
 
@@ -399,16 +411,15 @@ async def _http_latest_build(root: str, device_evm: str, os_type: str) -> str | 
         candidates.append((build_id, name))
     if not candidates:
         return None
-    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-        for _, build_name in sorted(candidates, reverse=True):
-            url = f"{root}/{device_evm}/{build_name}/{os_docs_name}"
-            try:
-                async with _FETCH_SEMAPHORE:
-                    r = await client.head(f"{url}/searchindex.js")
-                if r.status_code == 200:
-                    return url
-            except httpx.RequestError:
-                continue
+    for _, build_name in sorted(candidates, reverse=True):
+        url = f"{root}/{device_evm}/{build_name}/{os_docs_name}"
+        try:
+            async with _FETCH_SEMAPHORE:
+                r = await _HTTP_CLIENT.head(f"{url}/searchindex.js", timeout=10)
+            if r.status_code == 200:
+                return url
+        except httpx.RequestError:
+            continue
     return None
 
 
@@ -435,12 +446,11 @@ async def _resolve_http_docs(device: str, os_type: str, version: str) -> str | N
                     continue
                 candidate = f"{_HTTP_DOCS_ROOT}/{device_evm}/{name}/{os_docs_name}"
                 try:
-                    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-                        async with _FETCH_SEMAPHORE:
-                            r = await client.head(f"{candidate}/searchindex.js")
-                        if r.status_code == 200:
-                            url = candidate
-                            break
+                    async with _FETCH_SEMAPHORE:
+                        r = await _HTTP_CLIENT.head(f"{candidate}/searchindex.js", timeout=10)
+                    if r.status_code == 200:
+                        url = candidate
+                        break
                 except httpx.RequestError:
                     pass
         _HTTP_DOCS_CACHE[cache_key] = url
@@ -539,11 +549,10 @@ async def _catalog_from_github() -> list[dict[str, str]]:
     headers = {"Accept": "application/vnd.github+json"}
     if _GITHUB_TOKEN:
         headers["Authorization"] = f"Bearer {_GITHUB_TOKEN}"
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        async with _FETCH_SEMAPHORE:
-            r = await client.get(url, headers=headers)
-        r.raise_for_status()
-        data = r.json()
+    async with _FETCH_SEMAPHORE:
+        r = await _HTTP_CLIENT.get(url, headers=headers, timeout=30)
+    r.raise_for_status()
+    data = r.json()
 
     if data.get("truncated"):
         sys.stderr.write(
@@ -696,11 +705,10 @@ async def _probe_ti_tool_id(device: str) -> str | None:
         f"{device[:-1]}-LINUX-SDK",
         f"{device}-PROCESSOR-LINUX-SDK",
     ]
-    async with httpx.AsyncClient(timeout=4, follow_redirects=False) as client:
-        probe_results = await asyncio.gather(
-            *[client.head(f"https://www.ti.com/tool/download/{p}") for p in patterns],
-            return_exceptions=True,
-        )
+    probe_results = await asyncio.gather(
+        *[_HTTP_CLIENT.head(f"https://www.ti.com/tool/download/{p}", timeout=4, follow_redirects=False) for p in patterns],
+        return_exceptions=True,
+    )
 
     tool_id = next(
         (p for p, r in zip(patterns, probe_results)
@@ -735,12 +743,12 @@ async def _fetch_ti_versions(device: str) -> list[dict]:
             return []
 
         try:
-            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-                async with _FETCH_SEMAPHORE:
-                    r = await client.get(
-                        f"https://www.ti.com/tool/download/{tool_id}",
-                        headers={"User-Agent": "Mozilla/5.0"},
-                    )
+            async with _FETCH_SEMAPHORE:
+                r = await _HTTP_CLIENT.get(
+                    f"https://www.ti.com/tool/download/{tool_id}",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=10,
+                )
             m = _TI_ITEMS_RE.search(r.text)
             if not m:
                 versions = []
@@ -808,15 +816,31 @@ _INDEX_ERRORS: dict[tuple, str]            = {}
 _GLOBAL_LOCK   = asyncio.Lock()
 
 # Asset cache (LRU) for get_asset tool
-_ASSET_CACHE: dict[tuple, tuple[bytes, str, int]] = {}
-_ASSET_CACHE_KEYS: list[tuple] = []
+_ASSET_CACHE: OrderedDict[tuple, str] = OrderedDict()
 _ASSET_CACHE_MAX: int = int(_os.environ.get("TI_PROCESSOR_SDK_MAX_ASSETS_PER_VARIANT", "200"))
+_MAX_ASSET_BYTES: int = int(_os.environ.get("TI_PROCESSOR_SDK_MAX_ASSET_BYTES", str(20 * 1024 * 1024)))  # 20 MB download limit
+
+_HTTP_CLIENT = httpx.AsyncClient(
+    follow_redirects=True,
+    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+)
 
 _FTS_DBS:           dict[tuple, sqlite3.Connection | None] = {}
 _FTS_DB_FILES:      dict[tuple, str]                       = {}
 _FTS_DB_LOCKS:      dict[tuple, asyncio.Lock]              = {}
 _FTS_DB_GLOBAL_LOCK = asyncio.Lock()
 _FTS_SCHEMA_CACHE:  dict[int, bool]                        = {}  # id(conn) -> has page_type col
+
+
+def _cleanup_fts_files() -> None:
+    for path in list(_FTS_DB_FILES.values()):
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+atexit.register(_cleanup_fts_files)
 
 
 def _cache_key(device: str, os_type: str, version: str, rt: bool, source: str) -> tuple:
@@ -849,11 +873,10 @@ async def _docs_location(
 # ---------------------------------------------------------------------------
 
 async def _fetch_index_raw(base_url: str) -> str:
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        async with _FETCH_SEMAPHORE:
-            r = await client.get(f"{base_url}/searchindex.js")
-        r.raise_for_status()
-        return r.text
+    async with _FETCH_SEMAPHORE:
+        r = await _HTTP_CLIENT.get(f"{base_url}/searchindex.js", timeout=30)
+    r.raise_for_status()
+    return r.text
 
 
 def _parse_index(raw: str) -> dict[str, Any]:
@@ -950,9 +973,8 @@ if _LEGACY_ROOT is not None:
 async def _download_fts_db(base_url: str) -> bytes | None:
     """Fetch searchindex.db from base_url. Returns None on 404 or network error."""
     try:
-        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-            async with _FETCH_SEMAPHORE:
-                r = await client.get(f"{base_url}/searchindex.db")
+        async with _FETCH_SEMAPHORE:
+            r = await _HTTP_CLIENT.get(f"{base_url}/searchindex.db", timeout=60)
         if r.status_code == 404:
             return None
         r.raise_for_status()
@@ -1079,16 +1101,15 @@ def _fts_search(
 async def _fetch_http(base_url: str, path: str) -> str:
     """Fetch a doc page from base_url/path and return clean text."""
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            async with _FETCH_SEMAPHORE:
-                r = await client.get(f"{base_url}/{path}")
-            if r.status_code == 404:
-                return (
-                    f"Page not found: {path}\n"
-                    "Use ti_processor_sdk_docs_search to find valid paths."
-                )
-            r.raise_for_status()
-            return _html_to_text(r.text)
+        async with _FETCH_SEMAPHORE:
+            r = await _HTTP_CLIENT.get(f"{base_url}/{path}", timeout=30)
+        if r.status_code == 404:
+            return (
+                f"Page not found: {path}\n"
+                "Use ti_processor_sdk_docs_search to find valid paths."
+            )
+        r.raise_for_status()
+        return _html_to_text(r.text)
     except httpx.HTTPStatusError as exc:
         return f"HTTP {exc.response.status_code} error fetching {path}: {exc.response.reason_phrase}"
     except httpx.RequestError as exc:
@@ -1114,16 +1135,15 @@ def _read_local_file(path: str, root: Path) -> str:
 async def _fetch_http_raw(base_url: str, path: str) -> str:
     """Fetch a doc page from base_url/path and return raw HTML (not cleaned)."""
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            async with _FETCH_SEMAPHORE:
-                r = await client.get(f"{base_url}/{path}")
-            if r.status_code == 404:
-                return (
-                    f"Page not found: {path}\n"
-                    "Use ti_processor_sdk_docs_search to find valid paths."
-                )
-            r.raise_for_status()
-            return r.text   # raw, not cleaned
+        async with _FETCH_SEMAPHORE:
+            r = await _HTTP_CLIENT.get(f"{base_url}/{path}", timeout=30)
+        if r.status_code == 404:
+            return (
+                f"Page not found: {path}\n"
+                "Use ti_processor_sdk_docs_search to find valid paths."
+            )
+        r.raise_for_status()
+        return r.text   # raw, not cleaned
     except httpx.HTTPStatusError as exc:
         return f"HTTP {exc.response.status_code} error fetching {path}: {exc.response.reason_phrase}"
     except httpx.RequestError as exc:
@@ -1362,10 +1382,11 @@ async def ti_processor_sdk_docs_search(
     key = _LEGACY_KEY if _is_legacy_mode() else _cache_key(device, os, version, rt, source)
     fts_conn = await _ensure_fts_db(key, device, os, version, rt, source)
     if fts_conn is not None:
-        return json.dumps(
-            _fts_search(fts_conn, base_words, expanded_words, max_results),
-            indent=2,
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(
+            None, _fts_search, fts_conn, base_words, expanded_words, max_results
         )
+        return json.dumps(results, indent=2)
 
     # Sphinx IDF fallback -- used when searchindex.db is absent (old SDK versions)
     docnames:   list[str]      = idx["docnames"]
@@ -1466,10 +1487,11 @@ async def ti_processor_sdk_docs_get_asset(
         source: "software-dl" (default, versioned) or "github" (latest master only).
 
     Returns:
-        JSON string with fields:
+        JSON string with:
           - data: base64-encoded asset bytes
           - mimeType: MIME type (e.g. "image/png", "image/svg+xml", "application/pdf")
           - size: size in bytes of the original asset
+
     On error returns an error string (same convention as other tools).
     """
     # Validate inputs (reuse _validate for device, os, version, source, and asset_path as path)
@@ -1498,49 +1520,55 @@ async def ti_processor_sdk_docs_get_asset(
             asset_file = local / asset_path
             if not asset_file.is_file():
                 return f"Asset not found: {asset_path}"
+            file_size = asset_file.stat().st_size
+            if file_size > _MAX_ASSET_BYTES:
+                return f"Asset too large: {file_size} bytes (limit {_MAX_ASSET_BYTES})"
             data = asset_file.read_bytes()
         elif url is not None:
             asset_url = url.rstrip('/') + '/' + asset_path.lstrip('/')
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-                async with _FETCH_SEMAPHORE:
-                    r = await client.get(asset_url)
-                if r.status_code == 404:
-                    return f"Asset not found: {asset_path}"
-                r.raise_for_status()
-                data = r.content
+            async with _FETCH_SEMAPHORE:
+                async with _HTTP_CLIENT.stream("GET", asset_url, timeout=30) as r:
+                    if r.status_code == 404:
+                        return f"Asset not found: {asset_path}"
+                    r.raise_for_status()
+                    cl = r.headers.get("content-length")
+                    if cl and int(cl) > _MAX_ASSET_BYTES:
+                        return f"Asset too large: {cl} bytes (limit {_MAX_ASSET_BYTES})"
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in r.aiter_bytes(65536):
+                        size += len(chunk)
+                        if size > _MAX_ASSET_BYTES:
+                            return f"Asset too large: exceeds {_MAX_ASSET_BYTES} bytes"
+                        chunks.append(chunk)
+                    data = b"".join(chunks)
         else:
             return "Variant not found"
     except Exception as e:
         return f"Failed to fetch asset: {str(e)}"
 
-    # Encode and get MIME type
-    import base64
-    b64 = base64.b64encode(data).decode("ascii")
+    # Encode, build result, cache with LRU eviction
     mime = _mime_from_asset_path(asset_path)
     size = len(data)
 
-    # Build result JSON
+    b64 = base64.b64encode(data).decode("ascii")
     result_json = json.dumps({"data": b64, "mimeType": mime, "size": size})
 
-    # Cache with LRU eviction
-    if cache_key in _ASSET_CACHE:
-        _ASSET_CACHE_KEYS.remove(cache_key)
-    elif len(_ASSET_CACHE) >= _ASSET_CACHE_MAX:
-        old = _ASSET_CACHE_KEYS.pop(0)
-        del _ASSET_CACHE[old]
+    if len(_ASSET_CACHE) >= _ASSET_CACHE_MAX:
+        _ASSET_CACHE.popitem(last=False)
     _ASSET_CACHE[cache_key] = result_json
-    _ASSET_CACHE_KEYS.append(cache_key)
 
     return result_json
 
 
 @mcp.tool()
-async def ti_processor_sdk_docs_list_page_assets(
+async def ti_processor_sdk_docs_list_assets(
     path: str,
     device: str = _DEFAULT_DEVICE,
     os: str = _DEFAULT_OS,
     version: str = "latest",
     source: str = "software-dl",
+    content_only: bool = True,
 ) -> str:
     """List all assets (images, diagrams, etc.) referenced in a documentation page.
 
@@ -1552,11 +1580,20 @@ async def ti_processor_sdk_docs_list_page_assets(
         os: OS type: "linux", "debian", or "buildroot".
         version: SDK version ("latest", full string like "12_01_00_05_03", or short alias like "12.01").
         source: "software-dl" (default, versioned) or "github" (latest master only).
+        content_only: When True (default), skip _static/ assets (fonts, CSS, JS, UI icons)
+                      and return only documentation content assets from _images/.
 
     Returns:
         JSON array of objects, each with:
           - path: asset path relative to documentation root
           - mimeType: MIME type (e.g. "image/png", "image/svg+xml")
+          - category: "diagram", "photo", "image", or "document"
+          - section_heading: nearest preceding heading (h1-h4) above the asset
+          - caption: figcaption text if the asset is inside a <figure>
+          - context_text: up to 150 chars of the nearest preceding paragraph
+          - dot_source: for Graphviz SVGs, the raw DOT language source (useful for
+                        text-only agents that cannot process binary image data)
+        Also returns a metadata object with page_title, asset_count, and status.
     On error returns an error string (same convention as other tools).
     """
     # Validate inputs
@@ -1573,28 +1610,43 @@ async def ti_processor_sdk_docs_list_page_assets(
     # Get location (local root or base URL)
     local, url = await _docs_location(device, os, version, rt=False, source=source)
 
-    # Fetch raw HTML
+    # Fetch raw HTML.
+    # _fetch_http_raw manages _FETCH_SEMAPHORE internally; local reads are sync.
+    # Do NOT wrap either call in an outer semaphore – that would double-acquire.
     try:
-        async with _FETCH_SEMAPHORE:
-            if local is not None:
-                html = _read_local_file_raw(path, local)
-            elif url is not None:
-                html = await _fetch_http_raw(url + path)
-            else:
-                return "Variant not found"
+        if local is not None:
+            html = _read_local_file_raw(path, local)
+        elif url is not None:
+            html = await _fetch_http_raw(url, path)
+        else:
+            return "Variant not found"
     except Exception as e:
         return f"Failed to fetch page: {str(e)}"
 
     # Parse HTML to find assets
-    from bs4 import BeautifulSoup
     try:
         soup = BeautifulSoup(html, "html.parser")
     except Exception as e:
         return f"Failed to parse HTML: {str(e)}"
 
+    # Page title from <title> or first <h1>
+    page_title = None
+    title_tag = soup.find("title")
+    if title_tag:
+        page_title = title_tag.get_text(strip=True)
+    if not page_title:
+        h1 = soup.find("h1")
+        if h1:
+            page_title = h1.get_text(strip=True)
+
     # Find tags that can reference external assets
     asset_tags = soup.find_all(['img', 'object', 'embed', 'source', 'audio', 'video'])
+    total_tags_found = len(asset_tags)
+    image_tags_found = len(soup.find_all('img'))
     assets = []
+    warnings = []
+    skipped_assets = 0
+    static_filtered = 0
 
     for tag in asset_tags:
         src = None
@@ -1606,19 +1658,100 @@ async def ti_processor_sdk_docs_list_page_assets(
             src = tag.get('src')
         elif tag.name in ('audio', 'video'):
             src = tag.get('src')
-            # Also check for poster attribute in video
             if tag.name == 'video' and not src:
                 src = tag.get('poster')
 
         if src and isinstance(src, str) and src.strip():
             src = src.strip()
-            # Normalize path: remove leading ./ and collapse ../
-            # For simplicity, we keep the path as-is and document that it's relative to docs root
-            # (same convention as the path field from search/read)
-            mime = _mime_from_asset_path(src)
-            assets.append({"path": src, "mimeType": mime})
+            # Resolve src relative to the documentation root
+            try:
+                if local is not None:
+                    html_file = local / path
+                    asset_absolute = (html_file.parent / src).resolve()
+                    asset_relative = asset_absolute.relative_to(local)
+                    asset_path_str = str(asset_relative)
+                else:
+                    html_absolute = url.rstrip('/') + '/' + path.lstrip('/')
+                    asset_absolute = _urljoin(html_absolute, src)
+                    if asset_absolute.startswith(url):
+                        asset_path_str = asset_absolute[len(url):]
+                        if asset_path_str.startswith('/'):
+                            asset_path_str = asset_path_str[1:]
+                    else:
+                        skipped_assets += 1
+                        continue
+            except Exception:
+                skipped_assets += 1
+                continue
 
-    # Deduplicate by path
+            # Filter _static/ when content_only=True
+            if content_only and (
+                asset_path_str.startswith('_static/')
+                or '/_static/' in asset_path_str
+            ):
+                static_filtered += 1
+                continue
+
+            mime = _mime_from_asset_path(asset_path_str)
+            category = _asset_category(asset_path_str, mime)
+
+            # --- Semantic context extraction ---
+            # Nearest preceding heading
+            h = tag.find_previous(['h1', 'h2', 'h3', 'h4'])
+            section_heading = h.get_text(strip=True) if h else None
+
+            # Figcaption from parent <figure>
+            caption = None
+            fig = tag.find_parent('figure')
+            if fig:
+                cap = fig.find('figcaption')
+                if cap:
+                    caption = cap.get_text(strip=True)
+
+            # Nearest preceding paragraph (up to 150 chars)
+            context_text = None
+            prev_p = tag.find_previous('p')
+            if prev_p:
+                txt = prev_p.get_text(strip=True)
+                if txt:
+                    context_text = txt[:150]
+
+            # DOT source for Graphviz SVGs
+            # Sphinx renders: <div class="graphviz"><object class="graphviz" data="...svg">
+            #                   <p class="warning">digraph ... { ... }</p></object></div>
+            dot_source = None
+            if tag.name == 'object' and 'graphviz' in (tag.get('class') or []):
+                warning_p = tag.find('p', class_='warning')
+                if warning_p:
+                    dot_src = warning_p.get_text(strip=True)
+                    if dot_src.startswith(('digraph', 'graph', 'strict')):
+                        dot_source = dot_src
+            # Also catch when iterating the outer div instead of the object
+            if dot_source is None:
+                parent_gv = tag.find_parent('div', class_='graphviz')
+                if parent_gv:
+                    inner_obj = parent_gv.find('object', class_='graphviz')
+                    if inner_obj:
+                        warning_p = inner_obj.find('p', class_='warning')
+                        if warning_p:
+                            dot_src = warning_p.get_text(strip=True)
+                            if dot_src.startswith(('digraph', 'graph', 'strict')):
+                                dot_source = dot_src
+
+            entry = {
+                "path": asset_path_str,
+                "mimeType": mime,
+                "category": category,
+                "section_heading": section_heading,
+                "caption": caption,
+                "context_text": context_text,
+            }
+            if dot_source is not None:
+                entry["dot_source"] = dot_source
+
+            assets.append(entry)
+
+    # Deduplicate by path (preserve first occurrence / richest context)
     seen = set()
     unique_assets = []
     for asset in assets:
@@ -1626,7 +1759,21 @@ async def ti_processor_sdk_docs_list_page_assets(
             seen.add(asset["path"])
             unique_assets.append(asset)
 
-    return json.dumps(unique_assets)
+    # Build metadata
+    metadata = {
+        "page_title": page_title,
+        "total_tags_found": total_tags_found,
+        "image_tags_found": image_tags_found,
+        "status": "success",
+        "asset_count": len(unique_assets),
+        "skipped_assets": skipped_assets,
+        "static_filtered": static_filtered,
+        "warnings": warnings,
+    }
+    if skipped_assets > 0:
+        warnings.append(f"Skipped {skipped_assets} asset(s) outside documentation root")
+
+    return json.dumps({"assets": unique_assets, "metadata": metadata})
 
 
 # ---------------------------------------------------------------------------
