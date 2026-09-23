@@ -56,7 +56,7 @@ docker run -d -p 7471:7471 \
 
 ---
 
-### Option B — TI-hosted endpoint
+### Option B — TI-hosted endpoint (Pending - Not deployed yet)
 
 TI hosts one instance. Customers register with a single URL — no Docker, no Python.
 
