@@ -1,0 +1,103 @@
+{
+  "board": {
+    "model": "Texas Instruments AM62P5 SK",
+    "compatible": "ti,am62p5-sk ti,am62p5 "
+  },
+  "kernel": "6.18.51-ti-00952-gfff856a50d43-dirty",
+  "machine": "aarch64",
+  "uptime_s": 271527,
+  "cmdline": "console=ttyS2,115200n8 earlycon=ns16550a,mmio32,0x02800000 root=PARTUUID=076c4a2a-02 rw rootfstype=ext4 rootwait",
+  "memory_kb": {
+    "total": 8071272,
+    "available": 7301092,
+    "cma_free": 541304
+  },
+  "thermal": [
+    {
+      "type": "main0-thermal",
+      "millicelsius": 51930
+    },
+    {
+      "type": "main1-thermal",
+      "millicelsius": 52151
+    },
+    {
+      "type": "main2-thermal",
+      "millicelsius": 53031
+    }
+  ],
+  "cpufreq": [
+    {
+      "cpu": "cpu0",
+      "cur_khz": 1400000,
+      "governor": "performance",
+      "available_khz": "200000 400000 600000 800000 1000000 1250000 1400000 "
+    },
+    {
+      "cpu": "cpu1",
+      "cur_khz": 1400000,
+      "governor": "performance",
+      "available_khz": "200000 400000 600000 800000 1000000 1250000 1400000 "
+    },
+    {
+      "cpu": "cpu2",
+      "cur_khz": 1400000,
+      "governor": "performance",
+      "available_khz": "200000 400000 600000 800000 1000000 1250000 1400000 "
+    },
+    {
+      "cpu": "cpu3",
+      "cur_khz": 1400000,
+      "governor": "performance",
+      "available_khz": "200000 400000 600000 800000 1000000 1250000 1400000 "
+    }
+  ],
+  "remoteproc": [
+    {
+      "id": "remoteproc0",
+      "name": "79000000.r5f",
+      "state": "running",
+      "firmware": "am62p-mcu-r5f0_0-fw"
+    },
+    {
+      "id": "remoteproc1",
+      "name": "78000000.r5f",
+      "state": "attached",
+      "firmware": "unknown"
+    }
+  ],
+  "disks": [
+    {
+      "mount": "/",
+      "fs": "/dev/root",
+      "size_kb": 29898652,
+      "avail_kb": 18470244,
+      "use": "36%"
+    },
+    {
+      "mount": "/run/media/rootfs-mmcblk0p1",
+      "fs": "/dev/mmcblk0p1",
+      "size_kb": 175392,
+      "avail_kb": 39180,
+      "use": "76%"
+    },
+    {
+      "mount": "/run/media/boot-mmcblk1p1",
+      "fs": "/dev/mmcblk1p1",
+      "size_kb": 130798,
+      "avail_kb": 100994,
+      "use": "23%"
+    }
+  ],
+  "failed_units": [],
+  "dmesg_errors": [
+    "[    1.809704] check access for rdinit=/init failed: -2, ignoring",
+    "[    4.765169] systemd[1]: Clear SysFail Entry If The Boot Is Successful skipped, unmet condition check ConditionPathExists=/sys/firmware/efi/efivars/LoaderEntrySysFail-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f",
+    "[   10.095241] powervr fd80000.gpu: Direct firmware load for powervr/rogue_36.53.104.796_v1.fw failed with error -2"
+  ],
+  "_sample": {
+    "board": "AM62P5 SK",
+    "date": "2026-10-12",
+    "note": "trimmed; produced by scripts/snapshot.sh over ssh"
+  }
+}
