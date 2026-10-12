@@ -1,2 +1,6 @@
 mcp/__pycache__/
+__pycache__/
 *.pyc
+# generated device facts (lib/gen-sdk-facts.py)
+target-platform/
+.claude/target-platform/
