@@ -61,7 +61,10 @@ case "$cmd" in
         check_v2; need gpioset; need timeout
         hold=${4:-5}
         echo "driving chip=$1 line=$2 value=$3 for ${hold}s" >&2
-        timeout "$hold" gpioset -c "$1" "$2=$3" || [ $? -eq 124 ]
+        gpioset -z -c "$1" "$2=$3" &
+        pid=$!
+        sleep "$hold"
+        kill "$pid" 2>/dev/null || true
         ;;
     watch)
         [ $# -ge 2 ] && [ $# -le 3 ] || usage

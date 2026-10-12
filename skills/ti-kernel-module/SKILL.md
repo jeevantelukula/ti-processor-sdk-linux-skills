@@ -32,6 +32,17 @@ Kbuild rules themselves are in the SDK kernel tree: `Documentation/kbuild/module
   `modules_prepare` is the minimal alternative (kernel docs: it does not build `Module.symvers`).
 - Host tools: `make`, `file`, `modinfo` (kmod); `ssh` only for `--board`.
 
+## R5 (32-bit) Module Build Limitation
+**Building for R5 (ARCH=arm, CROSS_COMPILE=$TI_CROSS_COMPILE_R5) against a kernel built for A53 (aarch64) fails.**
+
+The SDK kernel tree is built with the 64-bit toolchain (`aarch64-oe-linux-gcc`). Attempting to build a module with the 32-bit toolchain (`arm-oe-eabi-gcc`) produces a compiler plugin mismatch error:
+```
+cc1: error: plugin arm_ssp_per_task_plugin should be specified before '-fplugin-arg-arm_ssp_per_task_plugin-offset=1312'
+```
+This is because the kernel's Kconfig/plugins were configured for the 64-bit compiler. To build 32-bit modules, the kernel must first be built with the 32-bit toolchain (`make ARCH=arm CROSS_COMPILE=$TI_CROSS_COMPILE_R5`), which is not the default SDK flow.
+
+**Workaround:** Build modules for A53 (64-bit) using the standard `scripts/build-module.sh` flow. R5 firmware should be built from the MCU+ SDK (baremetal), not as Linux kernel modules.
+
 ## Steps
 1. Module sources in one directory with a `Kbuild` (or `Makefile`) containing `obj-m := <name>.o`.
    A minimal working pair is in `references/example-module/` (`hello.c`, `Kbuild`).

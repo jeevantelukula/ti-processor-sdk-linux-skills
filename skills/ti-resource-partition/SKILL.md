@@ -72,17 +72,21 @@ grep -rn 'setup_qos' arch/arm/mach-k3                         # definition and p
 find arch/arm/mach-k3 -name '*_qos*'
 ```
 
-Example (AM62P SDK) - the consumer is the R5 SPL: `arch/arm/mach-k3/r5/am62px/am62p_qos_uboot.c`
+Example - the consumer is the R5 SPL: `arch/arm/mach-k3/r5/<soc>/<soc>_qos_uboot.c`
 (`struct k3_qos_data qos_data[]`, `K3_QOS_REG`/`K3_QOS_VAL`), a copy of the header next to it
 (with a license banner, so not byte-identical to `out/`), and `setup_qos()` in
 `arch/arm/mach-k3/common.c` (guarded by `CONFIG_K3_QOS`, enabled in the R5 defconfig; check with
 `grep -n K3_QOS $TI_UBOOT_SRC_DIR/configs/<r5 defconfig>`), called from the SoC init file. In the same SDK the
-grep finds QoS tables only for some SoCs (e.g. the am62px, am62ax and J7 directories); a SoC with no
-`*_qos_uboot.c` has no U-Boot QoS table in this SDK.
+grep finds QoS tables only for some SoCs; a SoC with no `*_qos_uboot.c` has no U-Boot QoS table in this SDK.
 
-A QoS change therefore means: regenerate with the tool per its user guide, update the U-Boot files
-found above, and rebuild the R5 boot image (`tiboot3`, see `ti-build-source`). How the `.syscfg`
-resource allocation (rm-cfg) reaches the device manager firmware is not documented in the SDK tree
+## QoS Change Workflow
+1. Edit `.syscfg` in SysConfig GUI (or CLI) to reassign DMA channels/rings/QOS for hosts
+2. Regenerate: tool writes `out/<soc>_qos.h` with updated `QOS_n`, `ORDERID_n`, `ASEL_n`, `EPRIORITY_n`, `VIRTID_n`, `ATYPE_n` macros
+3. Copy to U-Boot: `cp out/<soc>_qos.h $TI_UBOOT_SRC_DIR/arch/arm/mach-k3/r5/<soc>/<soc>_qos_uboot.c` (update the struct array)
+4. Rebuild R5: `make u-boot-r5` (produces `tiboot3*.bin` with new QoS config)
+5. Deploy: copy `tiboot3.bin` to boot partition (or `make u-boot_stage` + `ti-deploy-image`)
+
+How the `.syscfg` resource allocation (rm-cfg) reaches the device manager firmware is not documented in the SDK tree
 or the docs page; read the user guide rather than assume.
 
 ## Verify

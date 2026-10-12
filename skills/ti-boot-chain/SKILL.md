@@ -29,6 +29,21 @@ to your device. Cite the page path.
 - The device's security type (GP, HS-FS, HS-SE). It is a silicon property, see `references/security-modes.md`.
 - Serial console to the board for boot logs (baud and port per the board's quick start; not assumed here).
 
+## tiboot3 Security Variants (per SoC - check SDK directory)
+
+Each SoC provides up to three `tiboot3` variants in `board-support/prebuilt-images/<platform>/`:
+- `tiboot3-<soc>-gp-evm.bin` - General Purpose (no security)
+- `tiboot3-<soc>-hs-fs-evm.bin` - High Security Field Securable (default in SDK)
+- `tiboot3-<soc>-hs-evm.bin` - High Security Enforced (signed required)
+
+Use `ls $TI_SDK_ROOT/board-support/prebuilt-images/$TI_PLATFORM/tiboot3*.bin` to list what's available for your platform.
+
+Cross-variant behavior (docs Migration Guide):
+- HS-FS + unsigned: boots with "Skipping authentication" warning
+- HS-SE + unsigned: "Authentication failed!" - boots only signed
+- GP + signed: warning "certificate skipped"
+- Signed images boot on all variants
+
 ## The K3 flow (docs "Boot Flow")
 Docs: ROM supports boot only via the MCU R5 core, so (K3 devices with an R5 stage; see step 3 for an exception): ROM loads and authenticates `tiboot3.bin` (R5 SPL plus TIFS
 firmware) -> R5 SPL configures DDR, loads `tispl.bin`, loads the device-manager firmware, starts the A53

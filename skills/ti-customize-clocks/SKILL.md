@@ -121,6 +121,41 @@ Put it in the board DTS or a dedicated DTS/overlay (`ti-device-tree-overlay`), r
 `scaling_max_freq` / `scaling_min_freq` (kHz) under `cpufreq/`. Changing voltages, adding frequencies
 or other clock edits are not documented here; ask the user and point to the docs plus the TRM.
 
+## Generic Example: Disable Top OPP via DTBO Overlay
+
+```dts
+/dts-v1/;
+/plugin/;
+
+&a53_opp_table {
+	/* Disable highest OPP - check board DTS for voltage requirements */
+	opp-<highest-hz> {
+		status = "disabled";
+	};
+};
+```
+
+Build (host):
+```bash
+source lib/ti-sdk-env.sh
+bash skills/ti-device-tree-overlay/scripts/build-dtbo.sh disable-top-opp.dtso \
+    -o disable-top-opp.dtbo \
+    -b "$TI_SDK_ROOT/board-support/built-images/dtb/ti/<board>.dtb"
+```
+
+Deploy (target):
+```bash
+scp disable-top-opp.dtbo root@<board>:/boot/dtb/ti/
+ssh root@<board> 'echo "name_overlays=ti/disable-top-opp.dtbo" >> /run/media/boot-mmcblk1p1/uEnv.txt'
+ssh root@<board> reboot
+```
+
+Verify (target):
+```bash
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies
+# Expected: highest frequency removed from list
+```
+
 ### 5. LPM resume-latency constraint (docs: S/W architecture of system suspend, Low Power Modes)
 
 ```

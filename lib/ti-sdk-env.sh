@@ -83,7 +83,7 @@ _ti_env_grep_rules() {
 }
 
 # Docs MCP device key from PLATFORM: take the part before the first '-' (board suffix such as
-# -evm/-sk), uppercase, drop one trailing 'x' when the result ends in 'XX'. Checked against
+# -evm/-sk), uppercase, drop trailing 'XX' suffix when present. Checked against
 # ti_processor_sdk_docs_list_variants: am62pxx->AM62PX, am62xx->AM62X, am62lxx->AM62LX,
 # am62axx->AM62AX, am62dxx->AM62DX, am64xx->AM64X, am335x->AM335X. The result is a candidate:
 # if list_variants does not list it, ask the user.
@@ -91,7 +91,7 @@ _ti_env_docs_device() {
     local k=${1%%-*}
     [ -n "$k" ] || return 0
     k=$(printf '%s' "$k" | tr '[:lower:]' '[:upper:]')
-    case $k in *XX) k=${k%X} ;; esac
+    case $k in *XX) k=${k%XX} ;; esac
     printf '%s\n' "$k"
 }
 

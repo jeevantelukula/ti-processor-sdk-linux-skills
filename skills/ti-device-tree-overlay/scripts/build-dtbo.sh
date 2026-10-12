@@ -44,6 +44,11 @@ echo "built $out ($("$dtc" --version))"
 if [ -n "$base" ]; then
     [ -f "$base" ] || { echo "error: base dtb $base not found" >&2; exit 1; }
     [ -n "$fdtoverlay" ] || { echo "error: fdtoverlay not found" >&2; exit 1; }
+    # Verify base DTB has symbols (-@ flag) for label resolution
+    if ! dtc -I dtb -O dts "$base" 2>/dev/null | grep -q '__symbols__'; then
+        echo "error: base DTB lacks symbols (-@ flag). Rebuild with: make linux-dtbs" >&2
+        exit 1
+    fi
     tmp=$(mktemp)
     trap 'rm -f "$tmp"' EXIT
     "$fdtoverlay" -i "$base" -o "$tmp" "$out"
