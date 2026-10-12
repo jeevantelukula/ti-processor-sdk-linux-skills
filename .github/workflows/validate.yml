@@ -1,0 +1,23 @@
+name: Validate
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: pip install pyyaml
+      - name: Shell syntax and shellcheck
+        run: |
+          mapfile -t f < <(git ls-files '*.sh')
+          for s in "${f[@]}"; do bash -n "$s"; done
+          sudo apt-get install -y shellcheck
+          shellcheck -S warning "${f[@]}"
+      - name: Python syntax
+        run: git ls-files '*.py' | grep -v '^mcp/' | xargs -r python3 -m py_compile
+      - name: Skills structure
+        run: python3 .github/scripts/check_repo.py

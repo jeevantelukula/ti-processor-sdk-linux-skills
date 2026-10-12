@@ -163,15 +163,16 @@ def boot_files(root, platform):
 # ------------------------------------------------------------ DT tooling
 
 def find_tool(name, root, kernel):
-    p = shutil.which(name)
-    if p:
-        return p
     cands = []
     if root:
         cands += glob.glob(os.path.join(root, "*devkit", "sysroots", "x86_64-*", "usr", "bin", name))
         cands += glob.glob(os.path.join(root, "*devkit", "sysroots", "x86_64-*", "usr", "bin", "*", name))
     if kernel and name == "dtc":
         cands.append(os.path.join(kernel, "scripts", "dtc", "dtc"))
+    # Host as last resort (only if SDK has no dtc)
+    p = shutil.which(name)
+    if p:
+        cands.append(p)
     for c in cands:
         if os.access(c, os.X_OK):
             return c
