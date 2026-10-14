@@ -369,7 +369,7 @@ ti_processor_sdk_docs_get_asset(
 | `TI_PROCESSOR_SDK_CATALOG_TTL` | `86400` | Seconds before catalog is re-fetched (24h default) |
 | `TI_PROCESSOR_SDK_OS_PATTERNS` | — | Add or override OS URL patterns without editing server.py. Format: `os:prefix:version_suffix:latest_dir` comma-separated. Example: `rtos:processor-sdk-rtos::latest` |
 | `TI_PROCESSOR_SDK_TOOL_ID_OVERRIDES` | — | Override ti.com download tool ID per device (for restricted/renamed pages). Format: `DEVICE=TOOL_ID` comma-separated. Example: `AM62DX=PROCESSOR-SDK-LINUX-AM62DX` |
-| `TI_PROCESSOR_SDK_MAX_INDEXES` | `50` | Max variants held in memory. Oldest evicted when exceeded |
+| `TI_PROCESSOR_SDK_MAX_INDEXES` | `50` | Max variants held in memory. Least recently used evicted when exceeded |
 | `TI_PROCESSOR_SDK_MAX_CONCURRENT_FETCHES` | `10` | Max simultaneous HTTP fetches |
 | `TI_PROCESSOR_SDK_MAX_PAGES_PER_VARIANT` | `200` | Max pages cached per variant |
 | `TI_PROCESSOR_SDK_MAX_ASSETS_PER_VARIANT` | `200` | Max assets cached in the get_asset LRU cache |

@@ -915,6 +915,7 @@ async def _ensure_index(
     if key in _INDEX_ERRORS:
         raise VariantNotFoundError(_INDEX_ERRORS[key])
     if key in _INDEXES:
+        _INDEXES[key] = _INDEXES.pop(key)     # LRU: mark as most recently used
         return _INDEXES[key]
 
     async with _GLOBAL_LOCK:
@@ -925,6 +926,7 @@ async def _ensure_index(
         if key in _INDEX_ERRORS:
             raise VariantNotFoundError(_INDEX_ERRORS[key])
         if key in _INDEXES:
+            _INDEXES[key] = _INDEXES.pop(key)
             return _INDEXES[key]
 
         try:
@@ -1007,6 +1009,7 @@ async def _ensure_fts_db(
     None is cached after a 404/missing file to avoid re-probing on every search call.
     """
     if key in _FTS_DBS:
+        _FTS_DBS[key] = _FTS_DBS.pop(key)     # LRU, see _ensure_index
         return _FTS_DBS[key]
 
     async with _FTS_DB_GLOBAL_LOCK:
@@ -1015,6 +1018,7 @@ async def _ensure_fts_db(
 
     async with _FTS_DB_LOCKS[key]:
         if key in _FTS_DBS:
+            _FTS_DBS[key] = _FTS_DBS.pop(key)
             return _FTS_DBS[key]
 
         local, url = await _docs_location(device, os_type, version, rt, source)
@@ -1039,7 +1043,7 @@ async def _ensure_fts_db(
             "SELECT 1 FROM pragma_table_info('docs') WHERE name='page_type'"
         ).fetchone() is not None
 
-        # LRU: evict oldest real connection when at capacity
+        # LRU: evict the least recently used real connection when at capacity
         real_count = sum(1 for v in _FTS_DBS.values() if v is not None)
         if real_count >= _MAX_INDEXES:
             oldest = next(k for k, v in _FTS_DBS.items() if v is not None)
@@ -1197,6 +1201,7 @@ async def _fetch_page(
     key = _LEGACY_KEY if _is_legacy_mode() else _cache_key(device, os_type, version, rt, source)
     cache = _PAGE_CACHES.setdefault(key, {})
     if path in cache:
+        cache[path] = cache.pop(path)          # LRU, see _ensure_index
         return cache[path]
 
     local, url = await _docs_location(device, os_type, version, rt, source)
@@ -1580,6 +1585,7 @@ async def ti_processor_sdk_docs_get_asset(
     cache_key = (device, os, version, source, asset_path)
     if cache_key in _ASSET_CACHE:
         # Return cached result to avoid re-encoding
+        _ASSET_CACHE.move_to_end(cache_key)
         return _ASSET_CACHE[cache_key]
 
     # Fetch raw bytes
