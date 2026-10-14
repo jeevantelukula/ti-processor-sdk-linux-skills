@@ -161,8 +161,7 @@ mcp_reachable() {
 
 # Poll until the server answers (startup is ~1 s; 30 s covers a cold container).
 wait_reachable() {
-  local i
-  for i in $(seq 1 30); do mcp_reachable && return 0; sleep 1; done
+  for _ in $(seq 1 30); do mcp_reachable && return 0; sleep 1; done
   return 1
 }
 
@@ -246,6 +245,11 @@ case "$mcp_mode" in
     register_stdio || echo "install.sh: WARNING: docs MCP not registered" >&2
     ;;
   docker)
+    # The container publishes port 7471 on this host; register (and health-check) that.
+    if [[ $http_url != http://localhost:7471/* && $http_url != http://127.0.0.1:7471/* ]]; then
+      echo "install.sh: --mcp $http_url ignored with --mcp-mode docker; using the local container"
+      http_url=http://localhost:7471/mcp health_url=http://localhost:7471/health
+    fi
     if command -v docker >/dev/null 2>&1 && start_docker; then
       register_http
     else
