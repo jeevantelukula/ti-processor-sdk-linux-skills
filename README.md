@@ -10,6 +10,9 @@ documentation via the `ti-processor-sdk-docs` MCP.
 cd ~/ws && claude
 ```
 
+Add `--mcp-mode auto` to register the `ti-processor-sdk-docs` MCP too (HTTP server if one answers, else
+Docker, else a local stdio server). Re-run with `--force` to update; only the installer's own files are replaced.
+
 Packaged in an SDK installer, `install.sh` finds the SDK automatically. Standalone, pass `--sdk` or
 set `TI_SDK_ROOT`. See `AGENTS.md`, `context/mcp-usage.md`, and `mcp/README.md`.
 

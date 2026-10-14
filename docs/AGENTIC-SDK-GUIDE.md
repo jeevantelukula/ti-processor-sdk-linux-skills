@@ -124,7 +124,7 @@ facts that cannot be derived, and each needs evidence (`context/known-quirks.md`
 | `lib/ti-sdk-env.sh` | Reads `Rules.make`; exports SOC, PLATFORM, ARCH, U-Boot machines, DTB prefix, toolchain, docs device key, KB paths. Finds the SDK from env vars, the current directory, or the profile |
 | `lib/gen-sdk-facts.py` | Builds the fact sheet (stdlib Python, needs `cpp` and `dtc`) |
 | `context/` | Shared reference: workflow, SDK layout, MCP usage rules, known quirks |
-| `install.sh` | Copies the above into `<workspace>/.claude`, writes the profile, builds the fact sheet, optionally registers the docs MCP (`--mcp <url>`) |
+| `install.sh` | Copies the above into `<workspace>/.claude`, writes the profile, builds the fact sheet, optionally registers the docs MCP (`--mcp <url>` / `--mcp-mode auto\|docker\|stdio`) |
 | `.github/scripts/check_repo.py` | CI: skill structure, links, no stale references, lint against hardcoded SoC names |
 | `mcp/` | The documentation MCP server (separate deployment) |
 

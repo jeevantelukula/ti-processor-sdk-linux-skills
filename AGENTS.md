@@ -24,7 +24,7 @@ deploy, and validate on a TI K3 board. Skills live in `skills/` (one directory e
 | `lib/ti-sdk-env.sh` | Exports `TI_SOC`, `TI_PLATFORM`, `TI_ARCH`, `TI_SDK_ROOT`, `TI_KB`, ... from the SDK |
 | `templates/` | `target-profile.yaml` (user-chosen values only) |
 | `mcp/` | Docs MCP server source (deployed separately) |
-| `install.sh` | Copies `skills/`, `context/`, `lib/`, `templates/` into `<workspace>/.claude` |
+| `install.sh` | Copies `skills/`, `context/`, `lib/`, `templates/` and the MCP server into `<workspace>/.claude` (other `.claude` content is left alone); `--mcp-mode` registers the docs MCP |
 
 ## Contributing
 
