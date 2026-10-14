@@ -143,9 +143,9 @@ _ti_env_main() {
     }
     export TI_SDK_ROOT=$root
 
-    TI_SOC= TI_PLATFORM= TI_ARCH= TI_UBOOT_MACHINE= TI_UBOOT_MACHINE_R5=
-    TI_DTB_PREFIX= TI_CROSS_COMPILE= TI_CROSS_COMPILE_R5=
-    TI_KERNEL_SRC_DIR= TI_UBOOT_SRC_DIR= TI_KERNEL_VERSION= TI_DOCS_DEVICE=
+    TI_SOC='' TI_PLATFORM='' TI_ARCH='' TI_UBOOT_MACHINE='' TI_UBOOT_MACHINE_R5=''
+    TI_DTB_PREFIX='' TI_CROSS_COMPILE='' TI_CROSS_COMPILE_R5=''
+    TI_KERNEL_SRC_DIR='' TI_UBOOT_SRC_DIR='' TI_KERNEL_VERSION='' TI_DOCS_DEVICE=''
 
     local parsed
     parsed=$(_ti_env_eval_rules "$root") || parsed=
@@ -177,7 +177,7 @@ _ti_env_main() {
         TI_SDK_VERSION=${ver//_/.}
         TI_SDK_VERSION_DOCS=${ver//./_}
     else
-        TI_SDK_VERSION= TI_SDK_VERSION_DOCS=
+        TI_SDK_VERSION='' TI_SDK_VERSION_DOCS=''
         _ti_env_warn "cannot derive SDK version from directory name '$dir'"
     fi
 
@@ -210,7 +210,7 @@ _ti_env_main() {
             TI_FACTS_DIR=$PWD/target-platform
         fi
     fi
-    TI_KB= TI_FACTS_JSON=
+    TI_KB='' TI_FACTS_JSON=''
     if [ -n "$TI_PLATFORM" ]; then
         [ -f "$TI_FACTS_DIR/$TI_PLATFORM.md" ] && TI_KB=$TI_FACTS_DIR/$TI_PLATFORM.md
         [ -f "$TI_FACTS_DIR/$TI_PLATFORM.json" ] && TI_FACTS_JSON=$TI_FACTS_DIR/$TI_PLATFORM.json

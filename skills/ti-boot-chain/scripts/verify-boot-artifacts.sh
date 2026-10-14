@@ -2,7 +2,7 @@
 # List the boot binaries in an SDK's board-support/built-images (or prebuilt-images) and optionally compare them with the
 # files on a boot partition (mounted on the host, or copied from the board).
 # Usage: verify-boot-artifacts.sh [--boot-dir <dir>]
-# Environment: TI_SDK_ROOT (else discovered via lib/ti-sdk-env.sh). Read-only; changes nothing.
+# Environment: TI_SDK_ROOT (else discovered by ./ti-sdk-env.sh). Read-only; changes nothing.
 # Exit: 0 all required files present (and equal if --boot-dir given), 1 otherwise.
 set -euo pipefail
 
@@ -15,7 +15,7 @@ fi
 if [[ -z ${TI_SDK_ROOT:-} ]]; then
     # Not exported by the caller: load the SDK values ourselves (discovery: TI_SDK_ROOT, PROCESSOR_SDK_LINUX, cwd).
     here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    env_lib=${TI_SKILLS_DIR:-$(cd "$here/../../.." && pwd)}/lib/ti-sdk-env.sh
+    env_lib=$here/ti-sdk-env.sh     # this skill's own copy
     # shellcheck disable=SC1090
     [[ -f $env_lib ]] && source "$env_lib" 2>/dev/null || true
 fi

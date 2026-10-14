@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build an out-of-tree kernel module against the SDK kernel tree.
 # Usage: build-module.sh <module-dir> [--board <user@host>] [--clean]
-# Environment (exported by lib/ti-sdk-env.sh from the SDK Rules.make):
+# Environment (from the SDK Rules.make; loaded from ./ti-sdk-env.sh if unset):
 #   TI_SDK_ROOT, TI_ARCH, TI_CROSS_COMPILE        optional: KDIR (kernel tree, default below)
 # The module directory needs a Kbuild or Makefile with "obj-m := <name>.o".
 # --board only runs "uname -r" over ssh to compare with the tree's kernel release (read-only).
@@ -19,8 +19,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# SDK values: from the caller's environment, else from this skill's copy of ti-sdk-env.sh
+# (shell variables do not persist between an agent's commands, so do not rely on a prior source).
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+if [[ -z ${TI_ARCH:-} || -z ${TI_CROSS_COMPILE:-} ]]; then
+    # shellcheck source=ti-sdk-env.sh
+    source "$here/ti-sdk-env.sh" >/dev/null 2>&1 || true
+fi
 for v in TI_SDK_ROOT TI_ARCH TI_CROSS_COMPILE; do
-    [[ -n ${!v:-} ]] || { echo "ERROR: $v not set; source lib/ti-sdk-env.sh first" >&2; exit 1; }
+    [[ -n ${!v:-} ]] || { echo "ERROR: $v not set: no SDK found by ti-sdk-env.sh (set TI_SDK_ROOT)" >&2; exit 1; }
 done
 if [[ -n ${OECORE_TARGET_SYSROOT:-} ]]; then
     echo "ERROR: the SDK devkit environment-setup file is sourced (OECORE_TARGET_SYSROOT set)." >&2

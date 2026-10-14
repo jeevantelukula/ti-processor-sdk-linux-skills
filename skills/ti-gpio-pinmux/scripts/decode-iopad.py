@@ -11,7 +11,8 @@ Usage:
   decode-iopad.py [--header PATH] --pins-file FILE    # debugfs pinctrl 'pins' file ('-' = stdin)
   decode-iopad.py [--header PATH] --macros            # list IOPAD macros and PIN_* values
 
-Header lookup: --header, else $TI_KERNEL_SRC_DIR (or $TI_SDK_ROOT/board-support/ti-linux-kernel-*).
+Header lookup: --header, else $TI_KERNEL_SRC_DIR (or $TI_SDK_ROOT/board-support/ti-linux-kernel-*);
+unset values are loaded from ./ti-sdk-env.sh.
 """
 import argparse
 import ast
@@ -19,7 +20,21 @@ import glob
 import os
 import re
 import signal
+import subprocess
 import sys
+
+
+def sdk_env(*names):
+    """Values of TI_* names: from the environment, else from the ti-sdk-env.sh next to this
+    script (each skill bundles a copy; shell variables do not persist between agent commands)."""
+    vals = {n: os.environ.get(n, "") for n in names}
+    lib = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ti-sdk-env.sh")
+    if all(vals.values()) or not os.path.isfile(lib):
+        return vals
+    script = 'source "$1" >/dev/null 2>&1; shift; for n; do printf "%s\\0" "${!n}"; done'
+    r = subprocess.run(["bash", "-c", script, "_", lib, *names], stdout=subprocess.PIPE, universal_newlines=True)
+    got = r.stdout.split("\0")
+    return {n: vals[n] or (got[i] if i < len(got) else "") for i, n in enumerate(names)}
 
 HEADER_REL = "arch/arm64/boot/dts/ti/k3-pinctrl.h"
 DEFINE_RE = re.compile(r"^\s*#define\s+([A-Za-z_]\w*)\s+(\(.*\)|\d+)\s*(?:/\*.*)?$")
@@ -30,16 +45,17 @@ def find_header(explicit):
     if explicit:
         return explicit
     candidates = []
-    ksrc = os.environ.get("TI_KERNEL_SRC_DIR", "")
+    env = sdk_env("TI_KERNEL_SRC_DIR", "TI_SDK_ROOT")
+    ksrc = env["TI_KERNEL_SRC_DIR"]
     if ksrc:
         candidates.append(os.path.join(ksrc, HEADER_REL))
-    root = os.environ.get("TI_SDK_ROOT", "")
+    root = env["TI_SDK_ROOT"]
     if root:
         candidates += sorted(glob.glob(os.path.join(root, "board-support", "ti-linux-kernel-*", HEADER_REL)))
     for c in candidates:
         if os.path.isfile(c):
             return c
-    sys.exit("error: k3-pinctrl.h not found; pass --header or source lib/ti-sdk-env.sh")
+    sys.exit("error: k3-pinctrl.h not found; pass --header or set TI_SDK_ROOT")
 
 
 def parse_header(path):

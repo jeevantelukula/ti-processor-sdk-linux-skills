@@ -1,7 +1,7 @@
 # Using the `ti-processor-sdk-docs` MCP
 
 Skills do not embed TI documentation. They point to it and fetch it on demand
-through the `ti-processor-sdk-docs` MCP server (source: `mcp/`).
+through the `ti-processor-sdk-docs` MCP server (source: `mcp/` in the skills repository).
 
 ## Tools
 
@@ -18,8 +18,8 @@ through the `ti-processor-sdk-docs` MCP server (source: `mcp/`).
 
 ## Rules every skill follows
 
-1. Pass `device` and `version` explicitly. Never rely on defaults (default device is `AM62X`).
-2. Get `device` from `$TI_DOCS_DEVICE` (set by `lib/ti-sdk-env.sh`), else `docs.device` in
+1. Pass `device` and `version` explicitly. Never rely on defaults (the server default device, e.g. `AM62X`, is not yours).
+2. Get `device` from `$TI_DOCS_DEVICE` (set by the skill's `scripts/ti-sdk-env.sh`), else `docs.device` in
    `.claude/target-profile.yaml`, else find it with `ti_processor_sdk_docs_list_variants` and ask the user.
 3. Get `version` from `$TI_SDK_VERSION_DOCS` (derived from the SDK directory name, for example
    `12.02.00.01.01` becomes `12_02_00_01_01`; cross-check `manifest/software_manifest.txt`). If `list_versions` does not include it,

@@ -1,0 +1,19 @@
+# GENERATED COPY of templates/target-profile.yaml by tools/sync-shared.py: edit the source, then run python3 tools/sync-shared.py
+# Target profile: user-chosen values only.
+# Device facts (SOC, PLATFORM, ARCH, U-Boot machine, DTB prefix, toolchain) are NOT stored here;
+# they are read from the SDK Rules.make by lib/ti-sdk-env.sh, and the per-device knowledge base ($TI_KB)
+# is generated from the SDK by the ti-generate-kb skill.
+sdk:
+  root: /path/to/ti-processor-sdk-linux-<platform>-<version>   # REQUIRED
+board:
+  ip: ""            # OPTIONAL: target IP for ssh/scp
+  user: root        # OPTIONAL
+  boot_medium: ""   # REQUIRED for deploy: sd | emmc | tftp | nfs
+  security_mode: "" # REQUIRED for boot binaries: gp | hs-fs | hs  (check with docs MCP + silicon marking)
+  serial:
+    port: ""        # OPTIONAL: serial device (e.g. /dev/ttyUSB0, COM3)
+    baud: 115200    # OPTIONAL: baud rate (default 115200; check board guide)
+    program: ""     # OPTIONAL: terminal program (screen, minicom, picocom, cu)
+docs:
+  device: ""        # OPTIONAL override of the MCP device key (default: $TI_DOCS_DEVICE from lib/ti-sdk-env.sh)
+  version: latest   # MCP version; use the SDK version if list_versions has it

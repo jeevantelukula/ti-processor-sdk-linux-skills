@@ -3,7 +3,7 @@
 # test-apply it to a base .dtb with fdtoverlay (same tool the kernel build uses).
 #
 # Usage: build-dtbo.sh <overlay.dtso> [-o out.dtbo] [-b base.dtb]
-# Needs: TI_KERNEL_SRC_DIR (source lib/ti-sdk-env.sh) or KDIR=<kernel tree>; cpp; dtc.
+# Needs: KDIR=<kernel tree>, else TI_KERNEL_SRC_DIR (loaded from ./ti-sdk-env.sh if unset); cpp; dtc.
 # Include paths mirror the kernel's DTS preprocessing: <kernel>/include and
 # <kernel>/arch/arm64/boot/dts[/ti] (the .dtso may #include "k3-pinctrl.h").
 set -euo pipefail
@@ -23,9 +23,16 @@ while getopts "o:b:" opt; do
     esac
 done
 
+# SDK values: from the caller's environment, else from this skill's copy of ti-sdk-env.sh
+# (shell variables do not persist between an agent's commands, so do not rely on a prior source).
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+if [[ -z ${KDIR:-${TI_KERNEL_SRC_DIR:-}} ]]; then
+    # shellcheck source=ti-sdk-env.sh
+    source "$here/ti-sdk-env.sh" >/dev/null 2>&1 || true
+fi
 kdir=${KDIR:-${TI_KERNEL_SRC_DIR:-}}
 [ -n "$kdir" ] && [ -d "$kdir/include/dt-bindings" ] || {
-    echo "error: kernel tree not found; source lib/ti-sdk-env.sh or set KDIR" >&2; exit 1; }
+    echo "error: kernel tree not found (no SDK found by ti-sdk-env.sh); set TI_SDK_ROOT or KDIR" >&2; exit 1; }
 [ -f "$src" ] || { echo "error: $src not found" >&2; exit 1; }
 
 # Prefer the dtc built with the SDK kernel; fall back to the host one.

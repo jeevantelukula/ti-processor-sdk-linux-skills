@@ -5,8 +5,8 @@
 # serial_resolve [port] [baud]  sets SERIAL_PORT, SERIAL_BAUD, SERIAL_PROGRAM.
 #   Precedence: argument > TI_SERIAL_PORT/TI_SERIAL_BAUD/TI_SERIAL_PROGRAM > profile
 #   board.serial.{port,baud,program} > defaults (no port, 115200, screen).
-#   Profile: $TI_PROFILE, else ./.claude/target-profile.yaml, else the installed
-#   .claude/target-profile.yaml next to this skill (written by install.sh).
+#   Profile: $TI_PROFILE, else ./.claude/target-profile.yaml, else target-profile.yaml in the
+#   nearest .claude/ above this script (e.g. the workspace install.sh populated).
 # serial_open_check  fails if the port is missing, not readable/writable, or held by
 #   another process (a second reader would split the data stream between programs).
 # serial_configure   sets the line to raw 8N1, no flow control, no echo (stty).
@@ -14,8 +14,12 @@
 _serial_here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 serial_profile_path() {
-    local p
-    for p in "${TI_PROFILE:-}" "$PWD/.claude/target-profile.yaml" "$_serial_here/../../../target-profile.yaml"; do
+    local p d=$_serial_here cdir=""
+    while [[ -n $d && $d != / ]]; do          # nearest ancestor named .claude
+        [[ $(basename "$d") == .claude ]] && { cdir=$d; break; }
+        d=$(dirname "$d")
+    done
+    for p in "${TI_PROFILE:-}" "$PWD/.claude/target-profile.yaml" "${cdir:+$cdir/target-profile.yaml}"; do
         [[ -n $p && -f $p ]] && { printf '%s\n' "$p"; return 0; }
     done
     return 1

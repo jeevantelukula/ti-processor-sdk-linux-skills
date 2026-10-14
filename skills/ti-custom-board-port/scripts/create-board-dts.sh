@@ -9,7 +9,7 @@
 # Default is a dry run: prints what would be copied and every U-Boot file that mentions
 # the reference board. --apply copies the kernel .dts (never overwrites) into --out-dir
 # (default: the kernel dts/ti directory). Makefiles and defconfigs are NOT edited.
-# Needs TI_KERNEL_SRC_DIR and TI_UBOOT_SRC_DIR (source lib/ti-sdk-env.sh).
+# Needs TI_KERNEL_SRC_DIR and TI_UBOOT_SRC_DIR (loaded from ./ti-sdk-env.sh if unset).
 set -euo pipefail
 
 usage() { sed -n '2,12p' "$0" >&2; exit 2; }
@@ -26,8 +26,15 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-: "${TI_KERNEL_SRC_DIR:?source lib/ti-sdk-env.sh first}"
-: "${TI_UBOOT_SRC_DIR:?source lib/ti-sdk-env.sh first}"
+# SDK values: from the caller's environment, else from this skill's copy of ti-sdk-env.sh
+# (shell variables do not persist between an agent's commands, so do not rely on a prior source).
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+if [[ -z ${TI_KERNEL_SRC_DIR:-} || -z ${TI_UBOOT_SRC_DIR:-} ]]; then
+    # shellcheck source=ti-sdk-env.sh
+    source "$here/ti-sdk-env.sh" >/dev/null 2>&1 || true
+fi
+: "${TI_KERNEL_SRC_DIR:?no SDK found (set TI_SDK_ROOT)}"
+: "${TI_UBOOT_SRC_DIR:?no SDK found (set TI_SDK_ROOT)}"
 kdts=$TI_KERNEL_SRC_DIR/arch/arm64/boot/dts/ti
 src=$kdts/$ref.dts
 [ -f "$src" ] || { echo "error: $src not found" >&2; exit 1; }

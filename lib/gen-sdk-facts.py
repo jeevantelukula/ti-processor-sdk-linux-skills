@@ -22,6 +22,18 @@ def rel(path, base):
     except ValueError:
         return path
 
+def sdk_env(*names):
+    """Values of TI_* names: from the environment, else from the ti-sdk-env.sh next to this
+    script (each skill bundles a copy; shell variables do not persist between agent commands)."""
+    vals = {n: os.environ.get(n, "") for n in names}
+    lib = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ti-sdk-env.sh")
+    if all(vals.values()) or not os.path.isfile(lib):
+        return vals
+    script = 'source "$1" >/dev/null 2>&1; shift; for n; do printf "%s\\0" "${!n}"; done'
+    r = subprocess.run(["bash", "-c", script, "_", lib, *names], stdout=subprocess.PIPE, universal_newlines=True)
+    got = r.stdout.split("\0")
+    return {n: vals[n] or (got[i] if i < len(got) else "") for i, n in enumerate(names)}
+
 def run(cmd, **kw):
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                           universal_newlines=True, **kw)
@@ -590,13 +602,15 @@ def iopad_usage(closure, kernel):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--sdk-root", default=os.environ.get("TI_SDK_ROOT"))
+    ap.add_argument("--sdk-root", help="SDK root (default: TI_SDK_ROOT, else found by ./ti-sdk-env.sh)")
     ap.add_argument("--kernel-dir")
     ap.add_argument("--dts", help="override board DTS (testing against a kernel tree)")
     ap.add_argument("--out-dir")
     ap.add_argument("--format", default="md,json")
     ap.add_argument("--name", help="output file stem (default: PLATFORM)")
     args = ap.parse_args()
+    env = sdk_env("TI_SDK_ROOT", "TI_FACTS_DIR") if not (args.sdk_root and args.out_dir) else {}
+    args.sdk_root = args.sdk_root or env.get("TI_SDK_ROOT") or None
 
     root = os.path.abspath(args.sdk_root) if args.sdk_root else None
     if root and not os.path.isfile(os.path.join(root, "Rules.make")):
@@ -618,7 +632,7 @@ def main():
     name = name or "unknown-platform"
 
     # output dir
-    out_dir = args.out_dir or os.environ.get("TI_FACTS_DIR")
+    out_dir = args.out_dir or env.get("TI_FACTS_DIR")
     if not out_dir:
         ws = os.getcwd()
         out_dir = os.path.join(ws, ".claude", "target-platform") \

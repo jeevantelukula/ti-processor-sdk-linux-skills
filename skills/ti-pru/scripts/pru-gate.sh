@@ -6,8 +6,8 @@ set -euo pipefail
 
 [[ $# -eq 1 ]] || { echo "Usage: $0 <file.dtb> | --live" >&2; exit 2; }
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-lister="$here/../../ti-remoteproc/scripts/dt-cores.sh"
-[[ -x $lister ]] || { echo "ERROR: $lister not found (ti-remoteproc skill must be installed)" >&2; exit 1; }
+lister="$here/dt-cores.sh"     # this skill's copy (source: ti-remoteproc)
+[[ -x $lister ]] || { echo "ERROR: $lister not found" >&2; exit 1; }
 
 out=$("$lister" "$1")
 rows=$(printf '%s\n' "$out" | grep -E '[[:space:]]ti,[^[:space:]]*-(pru|rtu|tx-pru)[[:space:]]' || true)

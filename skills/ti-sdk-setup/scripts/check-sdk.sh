@@ -6,9 +6,8 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-skills_dir=${TI_SKILLS_DIR:-$(cd "$here/../../.." && pwd)}
-env_lib=$skills_dir/lib/ti-sdk-env.sh
-[ -f "$env_lib" ] || { echo "FAIL: $env_lib not found (set TI_SKILLS_DIR)" >&2; exit 1; }
+env_lib=$here/ti-sdk-env.sh     # this skill's own copy
+[ -f "$env_lib" ] || { echo "FAIL: $env_lib not found" >&2; exit 1; }
 
 [ $# -ge 1 ] && export TI_SDK_ROOT=$1
 # shellcheck disable=SC1090
@@ -30,7 +29,7 @@ echo "== Generated device facts (skill ti-generate-kb)"
 if [ -n "${TI_KB:-}" ] && [ -f "$TI_KB" ]; then
     ok "TI_KB=$TI_KB"
 else
-    warn "no generated KB for '${TI_PLATFORM:-?}': run the skill ti-generate-kb, then re-source lib/ti-sdk-env.sh"
+    warn "no generated KB for '${TI_PLATFORM:-?}': run the skill ti-generate-kb, then re-run this check"
 fi
 [ -n "${TI_DOCS_DEVICE:-}" ] || warn "TI_DOCS_DEVICE empty: ask the user for the docs MCP device key (ti_processor_sdk_docs_list_variants)"
 
