@@ -106,7 +106,7 @@ board or run `ssh root@<board> 'bash -s -- read gpiochip1 14' < scripts/gpio-tes
 gpiodetect                         # chips: gpiochipN [label] (lines)
 gpioinfo -c gpiochip1              # per line: name, direction, consumer
 gpioget --numeric -c gpiochip1 14  # read
-gpioset -c gpiochip1 14=1          # drive; the line is held only while gpioset runs (-z daemonizes)
+gpioset -c gpiochip1 14=1          # drive; held only while gpioset runs (do not use -z in scripts: it detaches)
 gpiomon -c gpiochip1 -n 5 14       # wait for 5 edge events
 ```
 Chip numbering is assigned at probe and the SoC GPIO chips are labelled by controller address (for example
@@ -124,4 +124,5 @@ Chip numbering is assigned at probe and the SoC GPIO chips are labelled by contr
 - This skill covers the libgpiod v2 CLI only; `gpio-test.sh` exits if the tools do not report v2 or later (v1 path untested).
 - `decode-iopad.py: k3-pinctrl.h not found`: source `lib/ti-sdk-env.sh` or pass `--header`.
 - Bare numbers on the decoder command line are decimal; prefix hex with `0x` (`--pins-file` input is hex as printed by debugfs).
-- Not covered (untested): `gpio-test.sh write` was only argument-checked, never run against live hardware.
+- `gpio-test.sh write` releases the line on exit, Ctrl-C or a dropped ssh session, and fails at once if the
+  line is busy. Tested against a libgpiod v2 stub, not yet on live hardware.

@@ -12,7 +12,7 @@ Usage:
   gpio-test.sh info  [chip]                      full gpioinfo for one chip (or all chips)
   gpio-test.sh find  <name>                      lines whose name or consumer contains <name>
   gpio-test.sh read  <chip> <line>               read a line as input (prints 0 or 1)
-  gpio-test.sh write <chip> <line> <0|1> [secs]  drive a line (default hold 5 s; GPIO is released on exit)
+  gpio-test.sh write <chip> <line> <0|1> [secs]  drive a line for [secs] (default 5), then release it
   gpio-test.sh watch <chip> <line> [events]      print edge events (default 10 events)
 chip = gpiochipN or the chip name shown by gpiodetect; line = offset shown by gpioinfo.
 EOF
@@ -58,13 +58,28 @@ case "$cmd" in
     write)
         [ $# -ge 3 ] && [ $# -le 4 ] || usage
         case "$3" in 0|1) ;; *) echo "error: value must be 0 or 1" >&2; exit 2 ;; esac
-        check_v2; need gpioset; need timeout
+        check_v2; need gpioset
         hold=${4:-5}
+        case "$hold" in ''|*[!0-9.]*|*.*.*) echo "error: secs must be a number" >&2; exit 2 ;; esac
         echo "driving chip=$1 line=$2 value=$3 for ${hold}s" >&2
-        gpioset -z -c "$1" "$2=$3" &
+        # Foreground gpioset (no -z): it keeps the line requested until it exits, and $! is
+        # its own PID. With -z it forks a daemon and returns at once, so $! is a dead process,
+        # the kill does nothing and the line stays requested after this script ends (later
+        # reads fail with "Device or resource busy").
+        gpioset -c "$1" "$2=$3" &
         pid=$!
+        # Release on every exit path (end of hold, Ctrl-C, ssh session dropped).
+        trap 'kill "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true' EXIT
+        trap 'exit 130' INT TERM HUP
+        sleep 0.3
+        if ! kill -0 "$pid" 2>/dev/null; then
+            rc=0; wait "$pid" || rc=$?
+            trap - EXIT
+            echo "error: gpioset exited with status $rc (line busy, or wrong chip/line?)" >&2
+            exit 1
+        fi
         sleep "$hold"
-        kill "$pid" 2>/dev/null || true
+        echo "released chip=$1 line=$2" >&2
         ;;
     watch)
         [ $# -ge 2 ] && [ $# -le 3 ] || usage
