@@ -1114,8 +1114,8 @@ def _fts_search(
 # Page fetching (clean text)
 # ---------------------------------------------------------------------------
 
-async def _fetch_http(base_url: str, path: str) -> str:
-    """Fetch a doc page from base_url/path and return clean text."""
+async def _fetch_http(base_url: str, path: str) -> tuple[str, bool]:
+    """Fetch a doc page from base_url/path. Returns (clean text or error message, ok)."""
     try:
         async with _FETCH_SEMAPHORE:
             r = await _HTTP_CLIENT.get(f"{base_url}/{path}", timeout=30)
@@ -1123,13 +1123,13 @@ async def _fetch_http(base_url: str, path: str) -> str:
             return (
                 f"Page not found: {path}\n"
                 "Use ti_processor_sdk_docs_search to find valid paths."
-            )
+            ), False
         r.raise_for_status()
-        return _html_to_text(r.text)
+        return _html_to_text(r.text), True
     except httpx.HTTPStatusError as exc:
-        return f"HTTP {exc.response.status_code} error fetching {path}: {exc.response.reason_phrase}"
+        return f"HTTP {exc.response.status_code} error fetching {path}: {exc.response.reason_phrase}", False
     except httpx.RequestError as exc:
-        return f"Network error fetching {path}: {exc}"
+        return f"Network error fetching {path}: {exc}", False
 
 
 def _safe_join(root: Path, rel: str) -> Path | None:
@@ -1143,16 +1143,17 @@ def _safe_join(root: Path, rel: str) -> Path | None:
     return full if full.is_relative_to(base) else None
 
 
-def _read_local_file(path: str, root: Path) -> str:
+def _read_local_file(path: str, root: Path) -> tuple[str, bool]:
+    """Read a local doc page. Returns (clean text or error message, ok)."""
     full = _safe_join(root, path)
     if full is None:
-        return "Error: path outside docs root"
+        return "Error: path outside docs root", False
     if not full.exists():
         return (
             f"Page not found: {path}\n"
             "Use ti_processor_sdk_docs_search to find valid paths."
-        )
-    return _html_to_text(full.read_text(encoding="utf-8", errors="replace"))
+        ), False
+    return _html_to_text(full.read_text(encoding="utf-8", errors="replace")), True
 
 
 # ---------------------------------------------------------------------------
@@ -1199,7 +1200,11 @@ async def _fetch_page(
         return cache[path]
 
     local, url = await _docs_location(device, os_type, version, rt, source)
-    text = _read_local_file(path, local) if local is not None else await _fetch_http(url, path)
+    text, ok = _read_local_file(path, local) if local is not None else await _fetch_http(url, path)
+    if not ok:
+        # Errors (network, 5xx, 429, 404 during a docs publish) are returned but not cached,
+        # so the next call retries instead of serving the error for the server's lifetime.
+        return text
 
     if len(cache) >= _MAX_PAGES_PER_VARIANT:
         del cache[next(iter(cache))]
