@@ -50,10 +50,12 @@ TI_PROCESSOR_SDK_DOCS_ROOT              local path -- locks tools to this path
 import logging
 import sys
 
+# Logs go to stderr: in stdio mode stdout is the JSON-RPC channel, and any
+# other byte on it (ours, httpx's or the mcp library's) corrupts the protocol.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+    handlers=[logging.StreamHandler(sys.stderr)],
 )
 logger = logging.getLogger("ti-sdk-mcp")
 
