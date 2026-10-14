@@ -158,6 +158,8 @@ def _validate(
         norm = path.replace("\\", "/")
         if not _PATH_SAFE_RE.match(norm):
             return f"Invalid path {path!r}: only alphanumeric, '/', '_', '-', '.' allowed."
+        if ".." in norm.split("/"):
+            return f"Invalid path {path!r}: '..' segments are not allowed."
     if query is not None and len(query) > _MAX_QUERY_LEN:
         return f"Query too long: max {_MAX_QUERY_LEN} characters."
     return None
@@ -1130,9 +1132,20 @@ async def _fetch_http(base_url: str, path: str) -> str:
         return f"Network error fetching {path}: {exc}"
 
 
+def _safe_join(root: Path, rel: str) -> Path | None:
+    """Resolve rel under root; None if the result (symlinks followed) leaves root.
+
+    Second line of defence after _validate. Uses a path-component check: a string
+    prefix check would accept a sibling such as <root>-private/.
+    """
+    base = root.resolve()
+    full = (base / rel).resolve()
+    return full if full.is_relative_to(base) else None
+
+
 def _read_local_file(path: str, root: Path) -> str:
-    full = (root / path).resolve()
-    if not str(full).startswith(str(root.resolve())):
+    full = _safe_join(root, path)
+    if full is None:
         return "Error: path outside docs root"
     if not full.exists():
         return (
@@ -1166,8 +1179,8 @@ async def _fetch_http_raw(base_url: str, path: str) -> str:
 
 def _read_local_file_raw(path: str, root: Path) -> str:
     """Read a local file and return raw string (not cleaned)."""
-    full = (root / path).resolve()
-    if not str(full).startswith(str(root.resolve())):
+    full = _safe_join(root, path)
+    if full is None:
         return "Error: path outside docs root"
     if not full.exists():
         return (
@@ -1567,7 +1580,9 @@ async def ti_processor_sdk_docs_get_asset(
     # Fetch raw bytes
     try:
         if local is not None:
-            asset_file = local / asset_path
+            asset_file = _safe_join(local, asset_path)
+            if asset_file is None:
+                return "Error: path outside docs root"
             if not asset_file.is_file():
                 return f"Asset not found: {asset_path}"
             file_size = asset_file.stat().st_size
@@ -1716,17 +1731,15 @@ async def ti_processor_sdk_docs_list_assets(
             # Resolve src relative to the documentation root
             try:
                 if local is not None:
-                    html_file = local / path
-                    asset_absolute = (html_file.parent / src).resolve()
-                    asset_relative = asset_absolute.relative_to(local)
-                    asset_path_str = str(asset_relative)
+                    base = local.resolve()
+                    asset_absolute = ((base / path).parent / src).resolve()
+                    # raises ValueError (-> skipped) when the asset is outside the root
+                    asset_path_str = str(asset_absolute.relative_to(base))
                 else:
-                    html_absolute = url.rstrip('/') + '/' + path.lstrip('/')
-                    asset_absolute = _urljoin(html_absolute, src)
-                    if asset_absolute.startswith(url):
-                        asset_path_str = asset_absolute[len(url):]
-                        if asset_path_str.startswith('/'):
-                            asset_path_str = asset_path_str[1:]
+                    url_root = url.rstrip('/') + '/'
+                    asset_absolute = _urljoin(url_root + path.lstrip('/'), src)
+                    if asset_absolute.startswith(url_root):
+                        asset_path_str = asset_absolute[len(url_root):]
                     else:
                         skipped_assets += 1
                         continue

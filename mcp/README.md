@@ -387,7 +387,8 @@ legacy mode — device/os/version parameters are accepted but ignored.
 
 ## Security
 
-- **Input validation**: device, os, version, path, source, and query are validated before use. Path traversal (`../`) and unsafe characters are rejected with a clear error message.
+- **Input validation**: device, os, version, path, source, and query are validated before use. Unsafe characters and `..` path segments are rejected with a clear error message.
+- **Docs-root containment**: every local read (`read`, `list_assets`, `get_asset`) resolves the path, following symlinks, and refuses anything outside the docs root (component check, so a sibling such as `<root>-private/` is refused too).
 - **SSRF protection**: `TI_PROCESSOR_SDK_DOCS_URL` and `TI_PROCESSOR_SDK_DOCS_HTTP_ROOT` are checked against an allowlist (`*.ti.com`, `texasinstruments.github.io`) at startup. Server exits with an error if the host is not permitted.
 - **Concurrency cap**: `TI_PROCESSOR_SDK_MAX_CONCURRENT_FETCHES` (default 10) limits simultaneous HTTP connections.
 - **Memory bounds**: indexes are evicted LRU at `TI_PROCESSOR_SDK_MAX_INDEXES` (default 50). Pages per variant are evicted LRU at `TI_PROCESSOR_SDK_MAX_PAGES_PER_VARIANT` (default 200).
