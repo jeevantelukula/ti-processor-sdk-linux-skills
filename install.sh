@@ -23,8 +23,9 @@ Usage: install.sh --workspace <dir> [--sdk <sdk-root>] [--mcp <url>] [--mcp-mode
                               docs from software-dl.ti.com, or from a local Sphinx build if
                               TI_PROCESSOR_SDK_DOCS_ROOT is exported (must contain searchindex.js)
                      none   = do not register (default when neither --mcp nor --mcp-mode is given)
-  --force            replace the files this installer owns (its skills, context/, lib/,
-                     templates/, mcp/, AGENTS.md, its .mcp.json entry). Nothing else is removed.
+  --force            replace the files this installer owns (its skills, context/, mcp/,
+                     AGENTS.md, its .mcp.json entry; lib/ and templates/ left by older
+                     versions are removed). Nothing else is removed.
 USAGE
 }
 
@@ -63,10 +64,13 @@ fi
 # --- files owned by this installer -------------------------------------------------------
 # Only these paths are created or (with --force) replaced. Anything else in .claude/
 # (settings.json, settings.local.json, the user's own skills, commands, agents) is left alone.
+# Skills are self-contained (each bundles its scripts/ti-sdk-env.sh etc.), so lib/ and
+# templates/ are no longer installed; they stay in the list so --force removes them from
+# installs made by older versions of this script.
 mkdir -p "$workspace"
 workspace="$(cd "$workspace" && pwd)"
 dest="$workspace/.claude"
-owned=(context lib templates mcp)
+owned=(context mcp lib templates)
 for s in "$repo"/skills/*/; do owned+=("skills/$(basename "$s")"); done
 
 existing=()
@@ -77,9 +81,7 @@ if [[ ${#existing[@]} -gt 0 && $force -ne 1 ]]; then
 fi
 mkdir -p "$dest/skills"
 for p in "${owned[@]}"; do rm -rf "${dest:?}/$p"; done
-for d in context lib templates; do
-  [[ -d "$repo/$d" ]] && cp -r "$repo/$d" "$dest/"
-done
+cp -r "$repo/context" "$dest/"
 for s in "$repo"/skills/*/; do cp -r "$s" "$dest/skills/"; done
 # Docs MCP server source, so a stdio registration does not depend on where this repo lives.
 mkdir -p "$dest/mcp"
@@ -130,11 +132,12 @@ fi
 
 # Generate the platform knowledge base from the SDK sources (non-fatal).
 if [[ -n "$sdk" ]]; then
-  if command -v python3 >/dev/null 2>&1 && [[ -f "$dest/lib/gen-sdk-facts.py" ]]; then
-    if python3 "$dest/lib/gen-sdk-facts.py" --sdk-root "$sdk" --out-dir "$dest/target-platform"; then
-      echo "install.sh: knowledge base in $dest/target-platform (re-run: python3 $dest/lib/gen-sdk-facts.py)"
+  gen="$dest/skills/ti-generate-kb/scripts/gen-sdk-facts.py"
+  if command -v python3 >/dev/null 2>&1 && [[ -f "$gen" ]]; then
+    if python3 "$gen" --sdk-root "$sdk" --out-dir "$dest/target-platform"; then
+      echo "install.sh: knowledge base in $dest/target-platform (re-run: skill ti-generate-kb)"
     else
-      echo "install.sh: WARNING: knowledge base generation failed; run python3 $dest/lib/gen-sdk-facts.py --sdk-root $sdk later" >&2
+      echo "install.sh: WARNING: knowledge base generation failed; run the ti-generate-kb skill later" >&2
     fi
   else
     echo "install.sh: WARNING: python3 or gen-sdk-facts.py missing; knowledge base not generated" >&2

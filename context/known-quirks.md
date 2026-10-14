@@ -1,6 +1,6 @@
 # Known quirks (not derivable from the SDK sources)
 
-Only facts that `lib/gen-sdk-facts.py` cannot read from the SDK. Each has evidence. Everything else
+Only facts that the knowledge-base generator (`gen-sdk-facts.py`) cannot read from the SDK. Each has evidence. Everything else
 belongs in the generated knowledge base (`$TI_KB`, skill `ti-generate-kb`), never here.
 
 ## Device-manager R5F is not booted by Linux

@@ -71,13 +71,13 @@ flowchart TB
         REPO["ti-processor-sdk-linux-skills<br/>(this repo, versioned on GitHub)"]
     end
     REPO -->|install.sh --sdk| WS
-    SDK -->|read at install time| GEN["lib/gen-sdk-facts.py"]
+    SDK -->|read at install time| GEN["gen-sdk-facts.py<br/>(in ti-generate-kb)"]
     GEN --> KB["Generated fact sheet<br/>target-platform/&lt;platform&gt;.md + .json"]
     subgraph WS["Customer workspace"]
         AG["AGENTS.md"]
         SK["18 skills"]
         KB
-        ENV["lib/ti-sdk-env.sh<br/>exports SOC, PLATFORM, toolchain,<br/>docs device key, KB path"]
+        ENV["scripts/ti-sdk-env.sh in each skill<br/>exports SOC, PLATFORM, toolchain,<br/>docs device key, KB path"]
     end
     USER((Customer)) -->|plain-language question| LLM["AI assistant<br/>(Claude Code or any AGENTS.md agent)"]
     LLM --> AG
@@ -120,11 +120,12 @@ facts that cannot be derived, and each needs evidence (`context/known-quirks.md`
 
 | Area | Contents |
 |---|---|
-| `skills/` | 18 task skills (table in section 4) |
+| `skills/` | 18 task skills (table in section 4). Each is self-contained: it bundles copies of the shared files below (`scripts/ti-sdk-env.sh`, `references/mcp-usage.md`, ...) and works when copied alone into `~/.claude/skills/` |
 | `lib/ti-sdk-env.sh` | Reads `Rules.make`; exports SOC, PLATFORM, ARCH, U-Boot machines, DTB prefix, toolchain, docs device key, KB paths. Finds the SDK from env vars, the current directory, or the profile |
-| `lib/gen-sdk-facts.py` | Builds the fact sheet (stdlib Python, needs `cpp` and `dtc`) |
+| `lib/gen-sdk-facts.py` | Builds the fact sheet (stdlib Python, needs `cpp` and `dtc`); bundled in `ti-generate-kb` |
+| `tools/sync-shared.py` | Copies each shared file (`lib/`, `context/mcp-usage.md`, `templates/`, cross-skill scripts) into the skills that use it; `--check` in CI |
 | `context/` | Shared reference: workflow, SDK layout, MCP usage rules, known quirks |
-| `install.sh` | Copies the above into `<workspace>/.claude`, writes the profile, builds the fact sheet, optionally registers the docs MCP (`--mcp <url>` / `--mcp-mode auto\|docker\|stdio`) |
+| `install.sh` | Copies `skills/`, `context/` and the MCP server into `<workspace>/.claude`, writes the profile, builds the fact sheet, optionally registers the docs MCP (`--mcp <url>` / `--mcp-mode auto\|docker\|stdio`) |
 | `.github/scripts/check_repo.py` | CI: skill structure, links, no stale references, lint against hardcoded SoC names |
 | `mcp/` | The documentation MCP server (separate deployment) |
 
@@ -553,4 +554,5 @@ cd ~/my-ws && claude
 ```
 
 Regenerate the device fact sheet after changing SDK sources:
-`python3 .claude/lib/gen-sdk-facts.py --sdk-root <sdk> --out-dir .claude/target-platform`
+`python3 .claude/skills/ti-generate-kb/scripts/gen-sdk-facts.py --sdk-root <sdk> --out-dir .claude/target-platform`
+(or ask the assistant to run the `ti-generate-kb` skill)

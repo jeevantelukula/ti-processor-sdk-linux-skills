@@ -16,4 +16,7 @@ Docker, else a local stdio server). Re-run with `--force` to update; only the in
 Packaged in an SDK installer, `install.sh` finds the SDK automatically. Standalone, pass `--sdk` or
 set `TI_SDK_ROOT`. See `AGENTS.md`, `context/mcp-usage.md`, and `mcp/README.md`.
 
+Each skill directory is self-contained and also works copied alone into `~/.claude/skills/`. Shared
+files have one source in `lib/`, `context/`, `templates/`; after editing one, run `python3 tools/sync-shared.py`.
+
 Demo and management guide: `docs/AGENTIC-SDK-GUIDE.md`.
