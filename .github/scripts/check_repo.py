@@ -3,7 +3,7 @@
 
 Errors fail the run. Warnings are printed and fail only with --strict.
 """
-import re, sys, pathlib
+import re, sys, pathlib, subprocess
 
 root = pathlib.Path(__file__).resolve().parents[2]
 strict = "--strict" in sys.argv
@@ -36,13 +36,55 @@ for d in skills:
     for sec in ("Steps", "Troubleshooting"):
         if not re.search(rf"^##+ .*{sec}", text, re.M):
             warnings.append(f"{d.name}: no '{sec}' section (CONTRIBUTING.md)")
-    if "mcp-usage.md" not in text:
-        errors.append(f"{d.name}: does not link context/mcp-usage.md")
+    if "(references/mcp-usage.md)" not in text or not (d / "references" / "mcp-usage.md").is_file():
+        errors.append(f"{d.name}: does not link its own references/mcp-usage.md")
     # every scripts/ file must be referenced from SKILL.md or a reference page
     for s in (d / "scripts").glob("*") if (d / "scripts").exists() else []:
         refs = list((d / "references").glob("*.md")) if (d / "references").exists() else []
         if s.name not in text and not any(s.name in r.read_text() for r in refs):
             errors.append(f"{d.name}: unreferenced script {s.name}")
+
+# ------------------------------------------------------------ self-contained skills
+# A skill directory must work alone (copied into ~/.claude/skills/, or used from the repo):
+# no paths into lib/, context/, templates/, the installed .claude/ layout or another skill.
+# Shared files are bundled by tools/sync-shared.py (generated copies are skipped here).
+OUTSIDE = re.compile(
+    r"<skills-root>|\.claude/(?:lib|skills|context|templates)/"
+    r"|(?<!\.\./)\.\./\.\./(?:context|templates)/|(?<!\.\./)\.\./\.\./lib/(?:ti-sdk-env|gen-sdk-facts)"
+    r"|(?<![\w/.-])(?:lib|context|templates)/(?:ti-sdk-env|gen-sdk-facts|mcp-usage|target-profile)"
+    r"|(?<![\w-])skills/ti-[a-z0-9-]+/|\.\./ti-[a-z0-9-]+/|(?<![\w/.-])ti-[a-z0-9-]+/(?:scripts|references|assets)/")
+HERE_REF = re.compile(r'"\$(?:here|_serial_here)/([A-Za-z0-9_.-]+)"')
+
+
+def generated(path):
+    return "GENERATED COPY of " in path.read_text(errors="replace")[:600]
+
+
+for d in skills:
+    files = [f for f in d.rglob("*") if f.is_file() and "__pycache__" not in f.parts and not generated(f)]
+    for f in files:
+        txt = f.read_text(errors="replace")
+        for i, line in enumerate(txt.splitlines(), 1):
+            m = OUTSIDE.search(line)
+            if m:
+                errors.append(f"{rel(f)}:{i}: '{m.group(0)}' points outside the skill (bundle it via tools/sync-shared.py)")
+        if f.suffix == ".md":
+            for i, line in enumerate(txt.splitlines(), 1):
+                for target in re.findall(r"\[[^\]]*\]\(([^)\s]+)\)", line):
+                    if re.match(r"^(https?:|mailto:|#)", target):
+                        continue
+                    dest = (f.parent / target.split("#", 1)[0]).resolve()
+                    if not dest.is_relative_to(d.resolve()):
+                        errors.append(f"{rel(f)}:{i}: link {target} leaves the skill directory")
+        if f.parent.name == "scripts":
+            for name in HERE_REF.findall(txt):
+                if not (f.parent / name).exists():
+                    errors.append(f"{rel(f)}: uses $here/{name}, which is not in {rel(f.parent)}")
+
+sync = subprocess.run([sys.executable, str(root / "tools" / "sync-shared.py"), "--check"],
+                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+if sync.returncode:
+    errors += [f"sync-shared: {l}" for l in sync.stdout.splitlines() if l.strip()]
 
 # ------------------------------------------------- docs: skill names, stale refs
 top_docs = [root / f for f in ("README.md", "AGENTS.md", "CONTRIBUTING.md")]
