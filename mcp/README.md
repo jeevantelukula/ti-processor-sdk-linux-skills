@@ -41,6 +41,16 @@ docker build -t ti-processor-sdk-docs-mcp ./mcp/
 docker run -d --name ti-processor-sdk-docs-mcp -p 7471:7471 ti-processor-sdk-docs-mcp
 ```
 
+**Check it is up** (HTTP mode only; plain HTTP, not an MCP tool):
+```bash
+curl -s http://localhost:7471/health               # liveness: {"status":"ok",...}, no outbound calls
+curl -s 'http://localhost:7471/health?upstream=1'  # also checks software-dl.ti.com; 503 if unreachable (proxy?)
+docker inspect -f '{{.State.Health.Status}}' ti-processor-sdk-docs-mcp   # starting -> healthy
+```
+The image HEALTHCHECK uses the liveness form, so a network outage does not mark the container
+unhealthy. Do not probe `GET /mcp`: the streamable-HTTP transport answers a plain GET with 406,
+and a `POST initialize` creates a session the server keeps until the client deletes it.
+
 **Register with Claude Code:**
 ```bash
 claude mcp add --transport http ti-processor-sdk-docs http://localhost:7471/mcp

@@ -20,7 +20,9 @@ ENV TI_PROCESSOR_SDK_MCP_PORT=7471
 
 EXPOSE 7471
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:7471/mcp', timeout=2)" || exit 1
+# Liveness only: /health is served by the same app as /mcp and makes no outbound
+# calls (GET /mcp answers 406 by design). Startup measured at ~0.7 s; 10 s grace.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7471/health', timeout=2)" || exit 1
 
 CMD ["python3", "server.py", "--http", "7471"]

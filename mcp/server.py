@@ -81,6 +81,8 @@ import httpx
 import snowballstemmer as _snowball
 from bs4 import BeautifulSoup, NavigableString, Tag
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 _STEMMER = _snowball.stemmer("english")
 
@@ -1287,10 +1289,40 @@ mcp = FastMCP(
 )
 
 
-@mcp.tool()
-async def health() -> str:
-    """Health check endpoint for orchestration."""
-    return "{\"status\": \"healthy\", \"service\": \"ti-processor-sdk-docs\"}"
+_UPSTREAM_PROBE_URL = "https://software-dl.ti.com/"
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request: Request) -> JSONResponse:
+    """Plain HTTP health endpoint (HTTP mode only; not an MCP tool).
+
+    GET /health             liveness: answered by the same Starlette app that serves
+                            /mcp, makes no outbound calls. Use it for the Docker
+                            HEALTHCHECK. (GET /mcp is not usable for this: the
+                            streamable-HTTP transport answers a plain GET with 406,
+                            and a POST initialize creates a session that is kept in
+                            memory until the client deletes it.)
+    GET /health?upstream=1  also checks that the docs host answers; 503 if it does not
+                            (proxy or network problem). Not for HEALTHCHECK: an
+                            upstream outage must not mark the container unhealthy.
+    """
+    body: dict[str, Any] = {"status": "ok", "service": "ti-processor-sdk-docs"}
+    if request.query_params.get("upstream", "0") not in ("", "0", "false"):
+        if _LEGACY_ROOT is not None or _LOCAL_DOCS_ROOT is not None:
+            body["upstream"] = {"reachable": True, "source": "local filesystem"}
+        else:
+            target = _LEGACY_URL or _HTTP_DOCS_ROOT or _UPSTREAM_PROBE_URL
+            try:
+                r = await _HTTP_CLIENT.head(target, timeout=5)
+                body["upstream"] = {"reachable": r.status_code < 500, "url": target,
+                                    "http_status": r.status_code}
+            except httpx.HTTPError as exc:
+                body["upstream"] = {"reachable": False, "url": target,
+                                    "error": f"{type(exc).__name__}: {exc}"}
+            if not body["upstream"]["reachable"]:
+                body["status"] = "degraded"
+                return JSONResponse(body, status_code=503)
+    return JSONResponse(body)
 
 
 @mcp.tool()
