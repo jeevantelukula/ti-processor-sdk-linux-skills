@@ -5,7 +5,7 @@
 | Setup | `ti-sdk-setup`, `ti-generate-kb` (builds the per-device knowledge base `$TI_KB` from the SDK) |
 | Customize | `ti-gpio-pinmux`, `ti-device-tree-overlay`, `ti-custom-board-port`, `ti-customize-clocks`, `ti-resource-partition`, `ti-yocto-custom-dt` |
 | Build | `ti-build-source` (SDK Makefile), `ti-yocto-build` (Yocto), `ti-kernel-module` |
-| Deploy | `ti-deploy-image`, `ti-boot-chain` |
+| Deploy | `ti-deploy-image`, `ti-boot-chain`, `ti-serial-console` |
 | Run on target | `ti-remoteproc`, `ti-pru` (only SoCs with PRU) |
 | Validate / debug | `ti-diagnostic` |
 

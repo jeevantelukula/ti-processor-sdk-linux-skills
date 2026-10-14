@@ -27,7 +27,7 @@ to your device. Cite the page path.
 - `lib/ti-sdk-env.sh` exported `TI_SDK_ROOT`, `TI_PLATFORM`, `TI_DOCS_DEVICE`; `$TI_KB` / `$TI_FACTS_JSON` hold the boot
   files and tiboot3 variants found in this SDK (run `ti-generate-kb` if unset).
 - The device's security type (GP, HS-FS, HS-SE). It is a silicon property, see `references/security-modes.md`.
-- Serial console to the board for boot logs (baud and port per the board's quick start; not assumed here).
+- Serial console to the board for boot logs (port, baud, program from profile `board.serial`; default 115200 8N1).
 
 ## tiboot3 Security Variants (per SoC - check SDK directory)
 

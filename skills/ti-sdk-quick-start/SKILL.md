@@ -29,14 +29,15 @@ below to find the key; ask the user if it is ambiguous.
 - A Linux x86_64 host and a Processor SDK Linux installer or an installed SDK directory.
 - Optional but needed to deploy and validate: a board reachable by ssh and a serial console.
 
-## Questions to ask (keep it to these four)
+## Questions to ask (keep it to these five)
 
 Ask them together, once. Do not infer answers from directory names or earlier sessions.
 
 1. SDK path: the installed `ti-processor-sdk-linux-*` directory (or "not installed yet").
 2. Board IP for ssh/scp, or "none" (build-only session).
-3. Boot medium: `sd`, `emmc`, `tftp`, or `nfs`.
-4. Silicon security mode: `gp`, `hs-fs`, or `hs`. The user reads it from the silicon marking or
+3. Serial console: device path (e.g. `/dev/ttyUSB0`, `COM3`), baud (default 115200), program (`screen`, `minicom`, `picocom`, `cu`), or "none".
+4. Boot medium: `sd`, `emmc`, `tftp`, or `nfs`.
+5. Silicon security mode: `gp`, `hs-fs`, or `hs`. The user reads it from the silicon marking or
    the board guide; if unsure, leave it open and research it with the docs MCP before choosing
    boot binaries (it decides which `tiboot3` file is used).
 
@@ -48,6 +49,9 @@ toolchain are NOT stored, they are read from the SDK):
 |---|---|---|
 | `sdk.root` | yes | absolute SDK path |
 | `board.ip`, `board.user` | no | target address, ssh user (`root` in the template) |
+| `board.serial.port` | no | serial device (e.g. `/dev/ttyUSB0`, `COM3`) |
+| `board.serial.baud` | no | baud rate (default `115200`) |
+| `board.serial.program` | no | terminal program (`screen`, `minicom`, `picocom`, `cu`) |
 | `board.boot_medium` | for deploy | `sd`, `emmc`, `tftp`, `nfs` |
 | `board.security_mode` | for boot binaries | `gp`, `hs-fs`, `hs` |
 | `docs.device`, `docs.version` | no | override of the MCP device key; MCP version (`latest` unless `list_versions` has the SDK version) |

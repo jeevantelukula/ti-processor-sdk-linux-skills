@@ -32,8 +32,7 @@ the SDK, tell the user if so. SDK scripts win over a page; report both. Cite the
   `filesystem/$TI_PLATFORM/*.tar.xz`) or built and staged via `ti-build-source`
   (`board-support/built-images/`).
 - Ask the user: boot medium (SD, eMMC, network), silicon security mode (decides which
-  `tiboot3` file is used; variant names are listed in `$TI_KB`), board IP or serial console, and the
-  exact SD card device. Profile keys: `../../templates/target-profile.yaml`.
+  `tiboot3` file is used; variant names are listed in `$TI_KB`), board IP, **serial console** (port, baud, program; see profile `board.serial`), and the exact SD card device. Profile keys: `../../templates/target-profile.yaml`.
 - Host `sudo`. Destructive steps (partitioning, `dd`) must be confirmed by the user against
   `lsblk` output. Do not pipe answers into interactive SDK scripts: give the user the command.
 

@@ -9,6 +9,10 @@ board:
   user: root        # OPTIONAL
   boot_medium: ""   # REQUIRED for deploy: sd | emmc | tftp | nfs
   security_mode: "" # REQUIRED for boot binaries: gp | hs-fs | hs  (check with docs MCP + silicon marking)
+  serial:
+    port: ""        # OPTIONAL: serial device (e.g. /dev/ttyUSB0, COM3)
+    baud: 115200    # OPTIONAL: baud rate (default 115200; check board guide)
+    program: ""     # OPTIONAL: terminal program (screen, minicom, picocom, cu)
 docs:
   device: ""        # OPTIONAL override of the MCP device key (default: $TI_DOCS_DEVICE from lib/ti-sdk-env.sh)
   version: latest   # MCP version; use the SDK version if list_versions has it
