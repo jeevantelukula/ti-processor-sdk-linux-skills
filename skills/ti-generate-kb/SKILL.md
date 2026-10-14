@@ -48,7 +48,7 @@ installed kernel DTS; the docs page may describe another release.
 ## How other skills consume it
 
 - Human-readable: read `$TI_KB` (Markdown). Cite its evidence lines.
-- Scripts and agents: parse `$TI_FACTS_JSON`. Layout: `meta{generated, generator, sdk_root, sdk_version, platform, skipped_sections[]}`
+- Scripts and agents: parse `$TI_FACTS_JSON`. Layout: `meta{generated, generator, sdk_root, sdk_version, platform, soc, kernel_dir, dts, dtc, skipped_sections[]}`
   and `sections.<key>{title, found, data, evidence[], note}`. Keys: `rules`, `components`, `boot_files`,
   `dt_identity`, `remoteprocs`, `reserved_memory`, `opp`, `pinmux`, `gpio`, `overlays`, `respart`, `bin`, `make_targets`.
   Example: `jq '.sections.remoteprocs.data[] | {node, firmware_name, status}' "$TI_FACTS_JSON"`.

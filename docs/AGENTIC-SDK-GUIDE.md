@@ -16,7 +16,7 @@ an SD card"). The assistant answers from three sources of truth, never from memo
 2. the customer's live board over ssh (read-only checks first),
 3. TI's published documentation, searched on demand through the `ti-processor-sdk-docs` MCP server.
 
-This repository packages that behavior as **17 skills** plus a **generator** that builds a
+This repository packages that behavior as **18 skills** plus a **generator** that builds a
 per-device fact sheet out of the installed SDK. Because device facts are generated from the SDK
 that the customer actually has, one repository serves every Sitara/K3 device and every release,
 and nobody has to hand-maintain per-device tables.
@@ -75,7 +75,7 @@ flowchart TB
     GEN --> KB["Generated fact sheet<br/>target-platform/&lt;platform&gt;.md + .json"]
     subgraph WS["Customer workspace"]
         AG["AGENTS.md"]
-        SK["17 skills"]
+        SK["18 skills"]
         KB
         ENV["lib/ti-sdk-env.sh<br/>exports SOC, PLATFORM, toolchain,<br/>docs device key, KB path"]
     end
@@ -120,7 +120,7 @@ facts that cannot be derived, and each needs evidence (`context/known-quirks.md`
 
 | Area | Contents |
 |---|---|
-| `skills/` | 17 task skills (table in section 4) |
+| `skills/` | 18 task skills (table in section 4) |
 | `lib/ti-sdk-env.sh` | Reads `Rules.make`; exports SOC, PLATFORM, ARCH, U-Boot machines, DTB prefix, toolchain, docs device key, KB paths. Finds the SDK from env vars, the current directory, or the profile |
 | `lib/gen-sdk-facts.py` | Builds the fact sheet (stdlib Python, needs `cpp` and `dtc`) |
 | `context/` | Shared reference: workflow, SDK layout, MCP usage rules, known quirks |
@@ -158,6 +158,7 @@ flowchart LR
     subgraph P4["4 Deploy and run"]
         D1[ti-deploy-image]
         D2[ti-boot-chain]
+        D5[ti-serial-console]
         D3[ti-remoteproc]
         D4[ti-pru]
     end
@@ -169,7 +170,7 @@ flowchart LR
 
 | Skill | The customer asks | What the assistant does |
 |---|---|---|
-| `ti-sdk-quick-start` | "I'm new, where do I start?" | Asks four questions (SDK path, board IP, boot medium, security mode), routes to the right skill |
+| `ti-sdk-quick-start` | "I'm new, where do I start?" | Asks five questions (SDK path, board IP, serial console, boot medium, security mode), routes to the right skill |
 | `ti-sdk-setup` | "Is my host ready?" | Runs the SDK host check, loads environment from `Rules.make`, checks toolchains and MCP |
 | `ti-generate-kb` | "What does my SoC have?" | Builds the per-device fact sheet from the SDK |
 | `ti-build-source` | "Rebuild kernel and U-Boot" | Discovers the SDK Makefile targets for this SoC and runs them; knows single-stage vs R5+A53 flows |
@@ -185,6 +186,7 @@ flowchart LR
 | `ti-resource-partition` | "Give my R5 firmware exclusive DMA channels" | Locates the SysConfig-based tool and its outputs, explains where the QoS header enters U-Boot |
 | `ti-yocto-build` | "I need a Yocto image, not the prebuilt rootfs" | `oe-layersetup` flow and `bitbake` targets with host requirements |
 | `ti-yocto-custom-dt` | "Get my device tree into the Yocto image" | Where the machine config defines device trees; marks unverified steps as such |
+| `ti-serial-console` | "It does not boot, show me the boot log" | Captures the UART log (SPL, U-Boot, kernel) to a file, stops autoboot, runs single U-Boot commands; opens an interactive terminal for the user |
 | `ti-diagnostic` | "Board is slow, hot, or behaving oddly" | One read-only JSON snapshot: identity, kernel, memory, thermal, cpufreq, cores, disks, failed units, dmesg errors |
 
 ---
@@ -489,15 +491,16 @@ Be explicit in front of management. "Verified" means run against the real SDK, b
 
 | Area | Status |
 |---|---|
-| Static checks (structure, links, SoC-name lint, shell and Python syntax) | Pass, 17 skills, 0 warnings |
+| Static checks (structure, links, SoC-name lint, shell and Python syntax) | Pass, 18 skills, 0 warnings (`check_repo.py`; `shellcheck -S warning` still reports pre-existing warnings, so the CI job fails) |
 | Fact sheet generator | Run on the AM62P SDK (matches the live board: model, both R5F cores and firmware, seven OPPs), the real AM62x SDK, AM335x and TDA54 SDKs (no crash); four more SoCs through their device trees |
 | Installer | Tested into a clean workspace with and without an SDK, with MCP registration |
 | `ti-diagnostic` | Run on the live board over ssh; valid JSON; also on an x86 host |
 | `ti-remoteproc`, `ti-pru` gating | Run against six SoC device trees and the live board; write paths tested on a fake sysfs tree, not on hardware |
-| `ti-gpio-pinmux` | Decoder run on all 206 live pad registers; GPIO list and read on the board; GPIO write only against stubs |
+| `ti-gpio-pinmux` | Decoder run on all 206 live pad registers; GPIO list and read on the board; GPIO write (release on exit, busy line) only against a libgpiod stub |
 | `ti-device-tree-overlay` | SDK overlay built and test-applied; not booted on the board |
 | `ti-build-source`, `ti-deploy-image` | Targets confirmed with `make -n`; scripts dry-run (eMMC script ran with `--dry-run` over ssh). No full build, no SD or eMMC write executed |
 | `ti-kernel-module` | Sample module built; not loaded on the board |
+| `ti-serial-console` | Capture, autoboot stop, U-Boot commands, timeouts and busy-port handling tested against a simulated console on a pty; not yet on a physical board |
 | `ti-yocto-build`, `ti-yocto-custom-dt` | Commands match TI docs and a local layer clone; no bitbake run; `.bbappend` syntax marked unverified |
 | `ti-customize-clocks`, `ti-resource-partition`, `ti-boot-chain` | Facts checked against the SDK DTS, U-Boot source and docs; no change applied to a board |
 | **Fresh-agent natural-language trials** | **Partially done.** Five independent simulator agents were started and then stopped when the model policy changed to on-prem only. UC3, UC4, UC5, UC6 and the UC2 dry run were then executed by the session assistant following the skills against the real SDK and board. UC1, UC8 to UC13 and UC15 were verified at skill, script and documentation level but have not been run as independent customer sessions. |

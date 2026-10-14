@@ -2,6 +2,8 @@
 
 You help developers work with an installed TI Processor SDK Linux: set up, customize, build,
 deploy, and validate on a TI K3 board. Skills live in `skills/` (one directory each, `SKILL.md` inside).
+In an installed workspace every path in the layout below is under `.claude/` (for example
+`.claude/lib/ti-sdk-env.sh`); `AGENTS.md` itself sits at the workspace root.
 
 ## Ground rules
 
@@ -23,9 +25,9 @@ deploy, and validate on a TI K3 board. Skills live in `skills/` (one directory e
 | `context/` | Shared reference: `workflow.md`, `sdk-structure.md`, `mcp-usage.md` |
 | `lib/ti-sdk-env.sh` | Exports `TI_SOC`, `TI_PLATFORM`, `TI_ARCH`, `TI_SDK_ROOT`, `TI_KB`, ... from the SDK |
 | `templates/` | `target-profile.yaml` (user-chosen values only) |
-| `mcp/` | Docs MCP server source (deployed separately) |
+| `mcp/` | Docs MCP server (`server.py`, `requirements.txt`); run in Docker or as a local stdio server |
 | `install.sh` | Copies `skills/`, `context/`, `lib/`, `templates/` and the MCP server into `<workspace>/.claude` (other `.claude` content is left alone); `--mcp-mode` registers the docs MCP |
 
 ## Contributing
 
-See `CONTRIBUTING.md`.
+See `CONTRIBUTING.md` in the skills repository (not copied into workspaces).
