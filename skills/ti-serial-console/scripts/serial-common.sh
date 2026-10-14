@@ -40,10 +40,11 @@ serial_resolve() {
         pp=$(serial_profile_value port "$prof"); pb=$(serial_profile_value baud "$prof")
         pg=$(serial_profile_value program "$prof")
     fi
+    # Read by the sourcing script (SERIAL_PROGRAM only by serial-connect.sh).
     SERIAL_PORT=${1:-${TI_SERIAL_PORT:-$pp}}
     SERIAL_BAUD=${2:-${TI_SERIAL_BAUD:-${pb:-115200}}}
+    # shellcheck disable=SC2034
     SERIAL_PROGRAM=${TI_SERIAL_PROGRAM:-${pg:-screen}}
-    SERIAL_PROFILE=${prof:-<none>}
     if [[ -z $SERIAL_PORT ]]; then
         echo "error: no serial port: pass --port, set TI_SERIAL_PORT, or board.serial.port in ${prof:-.claude/target-profile.yaml}" >&2
         serial_list_ports >&2
