@@ -5,12 +5,12 @@ description: Generate or refresh the per-platform knowledge base (cores and firm
 
 # Generate the platform knowledge base
 
-Device facts are never hand-written. `lib/gen-sdk-facts.py` reads the installed SDK and writes
+Device facts are never hand-written. `scripts/gen-sdk-facts.py` reads the installed SDK and writes
 `<platform>.md` and `<platform>.json`. Re-run it whenever the sources change.
 
 ## Docs (MCP)
 
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device`, `os`, `version` explicitly.
+Follow [references/mcp-usage.md](references/mcp-usage.md): pass `device`, `os`, `version` explicitly.
 The KB holds what the SDK contains. Use the docs to check meaning or procedure, not to fill KB gaps.
 
 - `ti_processor_sdk_docs_search(query="IPC remoteproc firmware file names", device=$TI_DOCS_DEVICE, os="linux", version="latest")`
@@ -21,7 +21,10 @@ installed kernel DTS; the docs page may describe another release.
 
 ## Prerequisites
 
-- An installed SDK (`Rules.make` plus `board-support/`), found by `lib/ti-sdk-env.sh`.
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
+- An installed SDK (`Rules.make` plus `board-support/`), found by `scripts/ti-sdk-env.sh`.
 - `python3` (stdlib only), `make`, host `cpp` and `dtc`. If `dtc` is not on the host the generator
   tries the SDK `linux-devkit` host sysroot and the kernel `scripts/dtc/dtc`. If none exists it skips the
   device-tree sections and lists them under "Skipped sections" in the header. Install `device-tree-compiler`
@@ -29,16 +32,15 @@ installed kernel DTS; the docs page may describe another release.
 
 ## Steps
 
-1. Load the environment: `source lib/ti-sdk-env.sh` (from the installed `.claude/lib/`).
-2. Generate:
+1. Generate (the script finds the SDK and output directory itself through `scripts/ti-sdk-env.sh`):
    ```bash
-   python3 .claude/lib/gen-sdk-facts.py      # installed workspace; in a repo checkout: python3 lib/gen-sdk-facts.py
+   python3 scripts/gen-sdk-facts.py
    ```
    Defaults: `--sdk-root $TI_SDK_ROOT`, `--out-dir $TI_FACTS_DIR`, `--format md,json`.
    Options: `--kernel-dir DIR`, `--dts FILE` (override the board DTS, for example to inspect another
    board or a patched DTS), `--name STEM` (output file name).
-3. Reload: `source lib/ti-sdk-env.sh` again so `$TI_KB` and `$TI_FACTS_JSON` point at the new files.
-4. Read `$TI_KB`. Sections: build configuration (`Rules.make`), component versions, boot files
+2. Locate the result: `source scripts/ti-sdk-env.sh >/dev/null && echo "$TI_KB $TI_FACTS_JSON"`.
+3. Read `$TI_KB`. Sections: build configuration (`Rules.make`), component versions, boot files
    (security-mode variants, which variant `tiboot3.bin` is byte-identical to), board DTS and how it was
    selected, remote processors (status, `firmware-name`, memory regions, `bootph-*`), reserved memory,
    OPP tables, pinmux (IOPAD macros the board DTS uses, pinctrl nodes), GPIO controllers, overlay
@@ -76,7 +78,7 @@ board, re-run with `--dts <kernel>/arch/.../<board>.dts --name <platform>`.
 - On a live board, spot-check: `/proc/device-tree/model` equals the KB model; `head /sys/class/remoteproc/*/name`
   matches the core nodes whose status is `okay`; `cpufreq` frequencies match the CPU OPP table (a silicon
   speed grade may hide higher OPPs through `opp-supported-hw`).
-- Manual test: `tests/test_gen_facts.sh` (needs an SDK).
+- Manual test, in the skills repository only: `tests/test_gen_facts.sh` (needs an SDK).
 
 ## Troubleshooting
 
@@ -87,5 +89,5 @@ board, re-run with `--dts <kernel>/arch/.../<board>.dts --name <platform>`.
   that is loaded by the boot chain (the device-manager core) attaches instead of booting: the DTS does not
   say which; check the boot files section and the docs IPC page.
 - Non-K3 or legacy SDK (for example AM335x): sections that do not apply read "not found". That is expected.
-- `$TI_DOCS_DEVICE` is derived from `PLATFORM` (see `lib/ti-sdk-env.sh`). If the MCP has no such key, ask the
+- `$TI_DOCS_DEVICE` is derived from `PLATFORM` (see `scripts/ti-sdk-env.sh`). If the MCP has no such key, ask the
   user and use `ti_processor_sdk_docs_list_variants`.

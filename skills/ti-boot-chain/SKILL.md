@@ -13,7 +13,7 @@ description: >
 Only what the SDK docs and the installed SDK state is recorded here. Flashing media is `ti-deploy-image`.
 
 ## Docs (MCP)
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`, `os="linux"`,
+Follow [references/mcp-usage.md](references/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`, `os="linux"`,
 `version=$TI_SDK_VERSION_DOCS` (else `latest`; the MCP lags the SDK, say so) explicitly. The SDK files win over a
 page; several pages are written for one SoC (the Migration Guide names one), so state which parts you applied
 to your device. Cite the page path.
@@ -24,7 +24,10 @@ to your device. Cite the page path.
 - `query="SD, eMMC and USB MMC boot modes"` -> `.../U-Boot/UG-Memory-K3.html`
 
 ## Prerequisites
-- `lib/ti-sdk-env.sh` exported `TI_SDK_ROOT`, `TI_PLATFORM`, `TI_DOCS_DEVICE`; `$TI_KB` / `$TI_FACTS_JSON` hold the boot
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
+- `scripts/ti-sdk-env.sh` exported `TI_SDK_ROOT`, `TI_PLATFORM`, `TI_DOCS_DEVICE`; `$TI_KB` / `$TI_FACTS_JSON` hold the boot
   files and tiboot3 variants found in this SDK (run `ti-generate-kb` if unset).
 - The device's security type (GP, HS-FS, HS-SE). It is a silicon property, see `references/security-modes.md`.
 - Serial console to the board for boot logs (port, baud, program from profile `board.serial`; default 115200 8N1).
@@ -58,7 +61,7 @@ and jumps to DM -> on the A53, TF-A/OP-TEE and A53 SPL (all from `tispl.bin`) ru
    ```
    K3 SDKs list `tiboot3*.bin`, `tispl.bin`, `u-boot.img` in `board-support/built-images`
    (or `prebuilt-images`). An SDK with `MLO` + `u-boot.img` (observed: an AM335x SDK) uses the older SPL flow,
-   which this skill does not cover beyond detection. The script sources `lib/ti-sdk-env.sh` itself if
+   which this skill does not cover beyond detection. The script sources `scripts/ti-sdk-env.sh` itself if
    `TI_SDK_ROOT` is unset (pass the SDK path via `TI_SDK_ROOT=...`).
 2. Choose the `tiboot3` variant for the silicon. The script prints which named variant `tiboot3.bin` equals;
    that default differs per SDK (example observed: an AM62P SDK default = HS-FS variant, an ADAS SDK default = GP).

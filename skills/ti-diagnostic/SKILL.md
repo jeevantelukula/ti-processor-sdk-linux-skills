@@ -9,7 +9,7 @@ Collect a read-only JSON snapshot from the target, then interpret it. Nothing is
 
 ## Docs (MCP)
 
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`, `os="linux"`,
+Follow [references/mcp-usage.md](references/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`, `os="linux"`,
 `version=$TI_SDK_VERSION_DOCS` (or `"latest"` when `ti_processor_sdk_docs_list_versions` lacks it; the MCP
 lags the SDK, so treat pages as guidance and the snapshot as the fact). Search by symptom, then read the hit:
 - `ti_processor_sdk_docs_search(query="remoteproc firmware load failure", device=$TI_DOCS_DEVICE, os="linux", version=<ver>)`
@@ -20,6 +20,9 @@ lags the SDK, so treat pages as guidance and the snapshot as the fact). Search b
 
 ## Prerequisites
 
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
 - Target booted to Linux, reachable by ssh (`board.ip` in the target profile) or a local shell on it.
 - `bash` on the target. No `jq` or `python3` needed on the target.
 

@@ -14,7 +14,7 @@ Scope is small on purpose: facts below were read from the SDK, the docs MCP, and
 `oe-layersetup`, `meta-ti` and `meta-tisdk` (read-only). Recipe edits that were not checked say so.
 
 ## Docs (MCP)
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md). Always pass
+Follow [references/mcp-usage.md](references/mcp-usage.md). Always pass
 `device=$TI_DOCS_DEVICE`, `os="linux"`, `version=$TI_SDK_VERSION_DOCS` (or `latest` if
 `ti_processor_sdk_docs_list_versions` lacks it; say so) explicitly. The SDK and your layer checkout win over a page.
 - `ti_processor_sdk_docs_search(query="Building the SDK with Yocto", ...)` then read `linux/Overview_Building_the_SDK.html`
@@ -26,9 +26,12 @@ Follow [../../context/mcp-usage.md](../../context/mcp-usage.md). Always pass
   names the `oeconfig` file (`ti-yocto-build` step 3).
 
 ## Prerequisites
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
 - A DTS or DTSO that already builds and boots through the SDK flow (`make linux-dtbs`; see `ti-device-tree-overlay`
   and `ti-custom-board-port`). Do not debug DTS errors inside bitbake first.
-- `source lib/ti-sdk-env.sh`. Machine name: `YOCTO_MACHINE` in the SDK `Rules.make` (else `PLATFORM`); `$TI_KB`
+- `source scripts/ti-sdk-env.sh`. Machine name: `YOCTO_MACHINE` in the SDK `Rules.make` (else `PLATFORM`); `$TI_KB`
   (from `ti-generate-kb`) lists the board DTS and overlays the SDK builds.
 - A Yocto host and layers per `ti-yocto-build`; this skill does not repeat them.
 

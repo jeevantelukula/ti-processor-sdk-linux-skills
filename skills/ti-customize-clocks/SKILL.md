@@ -14,7 +14,7 @@ as "example" were read on an AM62P SK with SDK 12.02.00.01.01; yours will differ
 
 ## Docs (MCP)
 
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md). Always pass `device`, `os`, `version`
+Follow [references/mcp-usage.md](references/mcp-usage.md). Always pass `device`, `os`, `version`
 explicitly: `device=$TI_DOCS_DEVICE`, `os="linux"`, `version=$TI_SDK_VERSION_DOCS` if
 `ti_processor_sdk_docs_list_versions` lists it, else `"latest"` (the MCP lags the SDK: say so and
 compare the page with the DTS on disk; the SDK wins for values).
@@ -28,11 +28,14 @@ compare the page with the DTS on disk; the SDK wins for values).
 
 ## Prerequisites
 
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
 - Target running the SDK Linux image. Check `cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_driver`
   (example: `cpufreq-dt`). No `cpufreq` directory means no DVFS on this SoC or the driver is not bound.
 - Whether the SoC has an A53 OPP table is a DTS fact, check it before promising cpufreq control:
   ```
-  source <skills-root>/lib/ti-sdk-env.sh      # TI_SDK_ROOT, TI_KERNEL_SRC_DIR, TI_DTB_PREFIX, TI_DOCS_DEVICE
+  source scripts/ti-sdk-env.sh      # TI_SDK_ROOT, TI_KERNEL_SRC_DIR, TI_DTB_PREFIX, TI_DOCS_DEVICE
   DTS=$TI_KERNEL_SRC_DIR/arch/arm64/boot/dts/ti
   grep -ln 'operating-points-v2-ti-cpu' "$DTS"/*.dtsi    # SoC dtsi that defines the CPU OPP table
   ```
@@ -137,8 +140,8 @@ or other clock edits are not documented here; ask the user and point to the docs
 
 Build (host):
 ```bash
-source lib/ti-sdk-env.sh
-bash skills/ti-device-tree-overlay/scripts/build-dtbo.sh disable-top-opp.dtso \
+source scripts/ti-sdk-env.sh >/dev/null &&
+bash scripts/build-dtbo.sh disable-top-opp.dtso \
     -o disable-top-opp.dtbo \
     -b "$TI_SDK_ROOT/board-support/built-images/dtb/ti/<board>.dtb"
 ```

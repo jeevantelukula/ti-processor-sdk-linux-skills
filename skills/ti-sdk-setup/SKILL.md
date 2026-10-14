@@ -10,7 +10,7 @@ come from the SDK, never from this file.
 
 ## Docs (MCP)
 
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): always pass `device`, `os` and
+Follow [references/mcp-usage.md](references/mcp-usage.md): always pass `device`, `os` and
 `version` explicitly (never the defaults). `device` is `$TI_DOCS_DEVICE`, `os` is `linux`,
 `version` is `$TI_SDK_VERSION_DOCS` if `ti_processor_sdk_docs_list_versions(device=$TI_DOCS_DEVICE)`
 lists it, else `latest` (MCP lags the SDK: say so). Where a page and the SDK disagree, the SDK wins; report both.
@@ -24,6 +24,9 @@ Cite the page path you used when you pass on a command.
 
 ## Prerequisites
 
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
 - x86_64 Linux host. The SDK's `bin/setup-host-check.sh` only accepts Ubuntu 22.04 and exits 1
   otherwise (read from the script; it tests the `lsb_release` codename against `jammy`). Docs: the SDK is built and tested on 22.04, other
   distributions are not blocked by the docs but are untested.
@@ -50,12 +53,12 @@ Cite the page path you used when you pass on a command.
    ```bash
    cd "$TI_SDK_ROOT" && ./setup.sh
    ```
-   Details of the network ones: [../ti-deploy-image/references/network-boot.md](../ti-deploy-image/references/network-boot.md).
+   The network ones (TFTP, NFS, U-Boot env) are covered by the `ti-deploy-image` skill.
 
 3. Load device values from the SDK (source it; do not execute it):
    ```bash
    export TI_SDK_ROOT=/path/to/ti-processor-sdk-linux-<machine>-<version>   # or cd into the SDK
-   source <skills-root>/lib/ti-sdk-env.sh
+   source scripts/ti-sdk-env.sh
    ```
    Discovery order: `$TI_SDK_ROOT`, `$PROCESSOR_SDK_LINUX`, then the cwd and its parents.
    Exports: `TI_SOC TI_PLATFORM TI_ARCH TI_UBOOT_MACHINE TI_UBOOT_MACHINE_R5 TI_DTB_PREFIX
@@ -69,7 +72,7 @@ Cite the page path you used when you pass on a command.
 
 4. Run the host and toolchain check:
    ```bash
-   <skills-root>/skills/ti-sdk-setup/scripts/check-sdk.sh [SDK_ROOT]
+   scripts/check-sdk.sh [SDK_ROOT]
    ```
    It runs `bin/setup-host-check.sh`, executes `${CROSS_COMPILE}gcc --version` for the A-core and
    (when `CROSS_COMPILE_ARMV7` exists) R5 toolchains, and checks `make gcc bison flex bc mkimage
@@ -89,7 +92,8 @@ Cite the page path you used when you pass on a command.
    - If the MCP is unreachable, say so and rely on the SDK on disk (Rules.make, Makefile).
 
 6. Record the answers for the other skills (SDK path, board IP, boot medium, security mode) in
-   the profile `../../templates/target-profile.yaml` (user-chosen values only).
+   the workspace profile `.claude/target-profile.yaml` (user-chosen values only; create it from
+   [assets/target-profile.yaml](assets/target-profile.yaml) if it does not exist).
 
 ## Verify
 

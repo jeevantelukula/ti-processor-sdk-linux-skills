@@ -14,7 +14,7 @@ Always list the tree first (step 1).
 
 ## Docs (MCP)
 
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device`, `os`, `version`
+Follow [references/mcp-usage.md](references/mcp-usage.md): pass `device`, `os`, `version`
 explicitly (`device=$TI_DOCS_DEVICE`, `os="linux"`, `version=$TI_SDK_VERSION_DOCS` if
 `ti_processor_sdk_docs_list_versions` has it, else `"latest"`; the MCP lags the SDK).
 
@@ -26,7 +26,10 @@ explicitly (`device=$TI_DOCS_DEVICE`, `os="linux"`, `version=$TI_SDK_VERSION_DOC
 
 ## Prerequisites
 
-- SDK installed; `source <skills-root>/lib/ti-sdk-env.sh` (`TI_SDK_ROOT`, `TI_SOC`, `TI_UBOOT_SRC_DIR`).
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
+- SDK installed; `source scripts/ti-sdk-env.sh` (`TI_SDK_ROOT`, `TI_SOC`, `TI_UBOOT_SRC_DIR`).
   Tool path: `$TI_SDK_ROOT/board-support/k3-respart-tool/`. If it does not exist, this SDK does not
   ship the tool; do not borrow another SoC's files.
 - To run the tool: TI SysConfig and the user guide linked from the docs. The `.syscfg` header names

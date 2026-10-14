@@ -13,7 +13,7 @@ Method: pick the SDK's own reference board for the same SoC and copy its files. 
 derived from the SDK trees; paths and names differ per SoC, so list them first, do not assume them.
 
 ## Docs (MCP)
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md). Always pass
+Follow [references/mcp-usage.md](references/mcp-usage.md). Always pass
 `device=$TI_DOCS_DEVICE os="linux" version=$TI_SDK_VERSION_DOCS` explicitly (empty `$TI_DOCS_DEVICE`: key from `$TI_KB` or
 `ti_processor_sdk_docs_list_variants`). If `ti_processor_sdk_docs_list_versions(device)` lacks your SDK version (the MCP lags new
 releases), use `version="latest"` and say so. Cite the doc `path` you relied on; where docs and the SDK tree disagree, report both.
@@ -24,7 +24,10 @@ releases), use `version="latest"` and say so. Cite the doc `path` you relied on;
 - `ti_processor_sdk_docs_search(query="GP to HS-FS Migration Guide tiboot3", ...)` (which tiboot3 binary matches the silicon).
 
 ## Prerequisites
-- SDK extracted, `source lib/ti-sdk-env.sh` (`TI_SOC`, `TI_PLATFORM`, `TI_UBOOT_MACHINE`, `TI_UBOOT_MACHINE_R5`, `TI_DTB_PREFIX`,
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
+- SDK extracted, `source scripts/ti-sdk-env.sh` (`TI_SOC`, `TI_PLATFORM`, `TI_UBOOT_MACHINE`, `TI_UBOOT_MACHINE_R5`, `TI_DTB_PREFIX`,
   `TI_KERNEL_SRC_DIR`, `TI_UBOOT_SRC_DIR`, `TI_CROSS_COMPILE`, `TI_CROSS_COMPILE_R5`, `TI_KB`, `TI_FACTS_JSON`).
   Reference board name, defconfigs, board directory and DDR/boot-binary names: read `$TI_KB` / `$TI_FACTS_JSON`; if unset or missing,
   run skill `ti-generate-kb`. Some SoCs have no R5 defconfig (empty `TI_UBOOT_MACHINE_R5`): then skip every R5 step.
@@ -37,7 +40,7 @@ releases), use `version="latest"` and say so. Cite the doc `path` you relied on;
 ```bash
 echo $TI_UBOOT_MACHINE $TI_UBOOT_MACHINE_R5 "$TI_DTB_PREFIX"
 grep -n "DEFAULT_DEVICE_TREE\|OF_UPSTREAM" $TI_UBOOT_SRC_DIR/configs/$TI_UBOOT_MACHINE $TI_UBOOT_SRC_DIR/configs/$TI_UBOOT_MACHINE_R5
-skills/ti-custom-board-port/scripts/create-board-dts.sh <reference-basename> <new-basename>     # dry run, prints every file to clone
+scripts/create-board-dts.sh <reference-basename> <new-basename>     # dry run, prints every file to clone
 ls $TI_UBOOT_SRC_DIR/board/ti/                                   # board directory of your SoC: env, evm.c, *-cfg.yaml
 ```
 What to find (derive each from your SDK with the commands above):
@@ -70,7 +73,7 @@ live board      /boot/dtb/ti/k3-am62p5-sk.dtb
 3. Keep `<new>` matching `$TI_DTB_PREFIX` (Rules.make `KERNEL_DEVICETREE_PREFIX`); `make linux-dtbs` selects files by that prefix
    and builds them with `DTC_FLAGS=-@` (`makerules/Makefile_linux-dtbs`). Install target: `$DESTDIR/boot/dtb/ti/`.
 4. Edit pinmux, regulators, peripherals for your hardware (`ti-gpio-pinmux`; options as overlays: `ti-device-tree-overlay`).
-Check the standalone compile quickly: `skills/ti-device-tree-overlay/scripts/build-dtbo.sh <new>.dts -o /tmp/x.dtb` (cpp+dtc with kernel includes;
+Check the standalone compile quickly: `scripts/build-dtbo.sh <new>.dts -o /tmp/x.dtb` (cpp+dtc with kernel includes;
 tested, as an example, on the reference board DTS of six SoCs from the AM62P SDK kernel tree (AM62P, AM62x, AM62A, AM62L, AM64x, AM62D): all compile).
 
 ### 3. U-Boot

@@ -11,7 +11,7 @@ description: >-
 # TI device tree overlay
 
 ## Docs (MCP)
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md). Always pass
+Follow [references/mcp-usage.md](references/mcp-usage.md). Always pass
 `device=$TI_DOCS_DEVICE os="linux" version=$TI_SDK_VERSION_DOCS` explicitly (empty `$TI_DOCS_DEVICE`: take the key from `$TI_KB` or
 `ti_processor_sdk_docs_list_variants`). If `ti_processor_sdk_docs_list_versions(device)` lacks your version (the MCP lags new SDK releases),
 use `version="latest"` and say so. Cite the doc `path` you relied on.
@@ -21,7 +21,10 @@ use `version="latest"` and say so. Cite the doc `path` you relied on.
 - Per-feature overlay pages, for example `ti_processor_sdk_docs_search(query="enable MCAN overlay", ...)`.
 
 ## Prerequisites
-- SDK on the host and `source lib/ti-sdk-env.sh` (`TI_SDK_ROOT`, `TI_KERNEL_SRC_DIR`, `TI_UBOOT_SRC_DIR`, `TI_DTB_PREFIX`, `TI_KB`, `TI_FACTS_JSON`).
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
+- SDK on the host and `source scripts/ti-sdk-env.sh` (`TI_SDK_ROOT`, `TI_KERNEL_SRC_DIR`, `TI_UBOOT_SRC_DIR`, `TI_DTB_PREFIX`, `TI_KB`, `TI_FACTS_JSON`).
   Per-device facts (default board DTB, pinctrl/peripheral labels, pinmux macro, shipped overlays): read `$TI_KB` / `$TI_FACTS_JSON`;
   if unset or missing, run skill `ti-generate-kb`.
 - The base board DTB must be built with symbols (`-@`) so `&label` fragments resolve. The SDK does this:
@@ -63,7 +66,7 @@ make linux-dtbs        # targets are derived from KERNEL_DEVICETREE_PREFIX in Ru
 
 Standalone check (host, no kernel build): 
 ```bash
-skills/ti-device-tree-overlay/scripts/build-dtbo.sh my.dtso -o my.dtbo -b <base>.dtb
+scripts/build-dtbo.sh my.dtso -o my.dtbo -b <base>.dtb
 ```
 This runs `cpp` with the kernel include paths, `dtc -@`, then `fdtoverlay` against the base DTB; it fails if a
 label or path is missing (exit status non-zero). Tested (example, AM62P SDK; other SoCs behave the same): `k3-am62p5-sk-rpi-hdr-ehrpwm.dtso` applied cleanly to the

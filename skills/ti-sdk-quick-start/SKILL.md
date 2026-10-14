@@ -7,14 +7,14 @@ description: Entry point and router for TI Processor SDK Linux work. Gathers the
 
 This skill does no work itself. It collects inputs, records them in a profile, and hands off to
 the skill that owns each phase. Device values are never asked: they come from the SDK
-`Rules.make` through `lib/ti-sdk-env.sh` (loaded by `ti-sdk-setup`), and per-device facts come
+`Rules.make` through `scripts/ti-sdk-env.sh` (loaded by `ti-sdk-setup`), and per-device facts come
 from the generated knowledge base (`$TI_KB`, `$TI_FACTS_JSON`, made by `ti-generate-kb`).
 
 ## Docs (MCP)
 
-Rules in [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device`, `os` and
+Rules in [references/mcp-usage.md](references/mcp-usage.md): pass `device`, `os` and
 `version` explicitly on every `ti_processor_sdk_docs_*` call; `device` comes from
-`$TI_DOCS_DEVICE` (set by `lib/ti-sdk-env.sh`) or the profile `docs.device`, never the default;
+`$TI_DOCS_DEVICE` (set by `scripts/ti-sdk-env.sh`) or the profile `docs.device`, never the default;
 `version` is `$TI_SDK_VERSION_DOCS` if `ti_processor_sdk_docs_list_versions` has it, else `latest`
 (tell the user the pages may lag the SDK). Before `ti-sdk-setup` has run, use the first two calls
 below to find the key; ask the user if it is ambiguous.
@@ -26,6 +26,9 @@ below to find the key; ask the user if it is ambiguous.
 
 ## Prerequisites
 
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
 - A Linux x86_64 host and a Processor SDK Linux installer or an installed SDK directory.
 - Optional but needed to deploy and validate: a board reachable by ssh and a serial console.
 
@@ -41,7 +44,8 @@ Ask them together, once. Do not infer answers from directory names or earlier se
    the board guide; if unsure, leave it open and research it with the docs MCP before choosing
    boot binaries (it decides which `tiboot3` file is used).
 
-Record the answers in a copy of [../../templates/target-profile.yaml](../../templates/target-profile.yaml).
+Record the answers in `.claude/target-profile.yaml` of the workspace (`install.sh` creates it; otherwise
+start from a copy of [assets/target-profile.yaml](assets/target-profile.yaml)).
 Profile contract (user-chosen values only; SOC, PLATFORM, ARCH, U-Boot machine, DTB prefix and
 toolchain are NOT stored, they are read from the SDK):
 

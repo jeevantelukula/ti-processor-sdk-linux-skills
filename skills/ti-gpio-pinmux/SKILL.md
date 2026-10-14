@@ -11,7 +11,7 @@ description: >-
 # TI GPIO and pinmux
 
 ## Docs (MCP)
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md). Always pass
+Follow [references/mcp-usage.md](references/mcp-usage.md). Always pass
 `device=$TI_DOCS_DEVICE os="linux" version=$TI_SDK_VERSION_DOCS`; never rely on defaults (the MCP default device is not yours).
 If `$TI_DOCS_DEVICE` is empty, take the docs key from `$TI_KB` or pick it with `ti_processor_sdk_docs_list_variants`.
 If `$TI_SDK_VERSION_DOCS` is missing from `ti_processor_sdk_docs_list_versions(device)`, use `version="latest"` and say the page may differ.
@@ -24,7 +24,10 @@ Fetch on demand, and cite the doc `path` you used in your answer:
 If search returns no page, say so and rely on the SDK kernel tree; do not answer from memory.
 
 ## Prerequisites
-- SDK on the host and `source lib/ti-sdk-env.sh` (exports `TI_SDK_ROOT`, `TI_KERNEL_SRC_DIR`, `TI_SOC`, `TI_KB`, `TI_FACTS_JSON`, ...).
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
+- SDK on the host and `source scripts/ti-sdk-env.sh` (exports `TI_SDK_ROOT`, `TI_KERNEL_SRC_DIR`, `TI_SOC`, `TI_KB`, `TI_FACTS_JSON`, ...).
   Per-device facts (pinmux macro name, default board DTS, pinctrl and GPIO node labels): read `$TI_KB` / `$TI_FACTS_JSON`;
   if they are unset or the file is missing, run skill `ti-generate-kb` first.
 - Live checks need a booted board over ssh as root. `/sys/kernel/debug` must be mounted (it was on the verified board).
@@ -114,7 +117,7 @@ Chip numbering is assigned at probe and the SoC GPIO chips are labelled by contr
 `gpioinfo` lists the line name and direction for each offset (names come from DTS `line-name`/`gpio-line-names`).
 
 ## Verify
-1. `dtc` accepts the DTS/DTSO (`ti-device-tree-overlay/scripts/build-dtbo.sh`).
+1. `dtc` accepts the DTS/DTSO (`scripts/build-dtbo.sh <file> -o /tmp/x.dtb[o]`).
 2. After boot: `pinmux-pins` shows your device as owner of the pad and `pins` decodes to the intended macro.
 3. `gpioinfo` shows the line (and `gpio-hog` name if used); `gpioget` / `gpiomon` behave as wired.
 
@@ -122,7 +125,7 @@ Chip numbering is assigned at probe and the SoC GPIO chips are labelled by contr
 - `pinmux-pins` prints `(MUX UNCLAIMED)` for a pad: no device has applied a pinctrl state containing it. Check
   `pinctrl-names`/`pinctrl-0` on the consumer and its `status` in the live tree under `/proc/device-tree`.
 - This skill covers the libgpiod v2 CLI only; `gpio-test.sh` exits if the tools do not report v2 or later (v1 path untested).
-- `decode-iopad.py: k3-pinctrl.h not found`: source `lib/ti-sdk-env.sh` or pass `--header`.
+- `decode-iopad.py: k3-pinctrl.h not found`: source `scripts/ti-sdk-env.sh` or pass `--header`.
 - Bare numbers on the decoder command line are decimal; prefix hex with `0x` (`--pins-file` input is hex as printed by debugfs).
 - `gpio-test.sh write` releases the line on exit, Ctrl-C or a dropped ssh session, and fails at once if the
   line is busy. Tested against a libgpiod v2 stub, not yet on live hardware.

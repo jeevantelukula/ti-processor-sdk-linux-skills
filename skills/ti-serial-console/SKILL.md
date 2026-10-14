@@ -11,7 +11,7 @@ agent's shell is not interactive, so the agent uses the two non-interactive scri
 
 ## Docs (MCP)
 
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`, `os="linux"`,
+Follow [references/mcp-usage.md](references/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`, `os="linux"`,
 `version=$TI_SDK_VERSION_DOCS` (else `latest`; say the MCP may lag the SDK). Cite the page path.
 - `ti_processor_sdk_docs_search(query="Setup UART serial console minicom", device=$TI_DOCS_DEVICE, os="linux", version=...)`
 - `ti_processor_sdk_docs_search(query="U-Boot environment uEnv.txt", ...)` before changing U-Boot variables.
@@ -20,6 +20,9 @@ Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device=$T
 
 ## Prerequisites
 
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
 - Profile `board.serial` (`port`, `baud`, `program`) in `.claude/target-profile.yaml`
   (see `ti-sdk-quick-start`), or pass `--port` / `--baud`, or set `TI_SERIAL_PORT` / `TI_SERIAL_BAUD`.
   Precedence: option > environment > profile > default (115200; `screen` for the interactive terminal).
@@ -55,11 +58,11 @@ Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device=$T
    exits 3 on timeout. Read-only commands such as `printenv`, `version`, `mmc list`, `bdinfo` are safe; anything
    that writes (`mmc write`, `fatwrite`, `env default -a`, `setenv` followed by `boot`) needs the user's go-ahead.
    `setenv` lasts until reset. To persist variables use `uEnv.txt` on the boot partition, not `saveenv` (TI
-   SDKs boot with the built-in default environment; see `ti-deploy-image` `references/network-boot.md`).
+   SDKs boot with the built-in default environment; procedure in the `ti-deploy-image` skill).
 
 4. Interactive terminal for the user (the agent cannot drive it): suggest the user run, in this session,
    ```bash
-   ! .claude/skills/ti-serial-console/scripts/serial-connect.sh --port <dev>
+   ! <absolute path of this skill>/scripts/serial-connect.sh --port <dev>
    ```
    | Program | Exit keys |
    |---|---|

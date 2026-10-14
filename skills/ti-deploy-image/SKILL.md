@@ -6,13 +6,13 @@ description: Put built or prebuilt SDK images on a TI board - create an SD card 
 # Deploy images to the board
 
 Everything here was read from the SDK `bin/` scripts, `Makefile`/`makerules`, the docs MCP, and
-a live board (read-only). Device values come from `lib/ti-sdk-env.sh` (see `ti-sdk-setup`); boot
+a live board (read-only). Device values come from `scripts/ti-sdk-env.sh` (see `ti-sdk-setup`); boot
 file names and security variants for your platform are in `$TI_KB` / `$TI_FACTS_JSON` (section
 "Boot files"; run `ti-generate-kb` if unset).
 
 ## Docs (MCP)
 
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`,
+Follow [references/mcp-usage.md](references/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`,
 `os="linux"`, `version=$TI_SDK_VERSION_DOCS` (else `latest`) explicitly every call; the MCP may lag
 the SDK, tell the user if so. SDK scripts win over a page; report both. Cite the page path you used.
 
@@ -27,12 +27,15 @@ the SDK, tell the user if so. SDK scripts win over a page; report both. Cite the
 
 ## Prerequisites
 
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
 - `ti-sdk-setup` done (`TI_SDK_ROOT`, `TI_PLATFORM`, ... exported).
 - Images exist: either SDK prebuilt (`board-support/prebuilt-images/$TI_PLATFORM/`,
   `filesystem/$TI_PLATFORM/*.tar.xz`) or built and staged via `ti-build-source`
   (`board-support/built-images/`).
 - Ask the user: boot medium (SD, eMMC, network), silicon security mode (decides which
-  `tiboot3` file is used; variant names are listed in `$TI_KB`), board IP, **serial console** (port, baud, program; see profile `board.serial`), and the exact SD card device. Profile keys: `../../templates/target-profile.yaml`.
+  `tiboot3` file is used; variant names are listed in `$TI_KB`), board IP, **serial console** (port, baud, program; see profile `board.serial`), and the exact SD card device. Profile keys: `board.*` in `.claude/target-profile.yaml` (see `ti-sdk-quick-start`).
 - Host `sudo`. Destructive steps (partitioning, `dd`) must be confirmed by the user against
   `lsblk` output. Do not pipe answers into interactive SDK scripts: give the user the command.
 
@@ -69,7 +72,7 @@ the SDK, tell the user if so. SDK scripts win over a page; report both. Cite the
    area). Commands, offsets, EXT_CSD settings and the write-once warning:
    [references/emmc.md](references/emmc.md). Target-side helper with dry-run and read-back:
    ```bash
-   scp <skills-root>/skills/ti-deploy-image/scripts/flash-emmc-boot0.sh root@<board-ip>:/tmp/
+   scp scripts/flash-emmc-boot0.sh root@<board-ip>:/tmp/
    ssh root@<board-ip> /tmp/flash-emmc-boot0.sh --emmc <dev> --part boot0 \
        --image <file>:<sector> [--image <file>:<sector> ...] --dry-run
    ```

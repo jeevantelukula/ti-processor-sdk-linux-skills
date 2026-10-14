@@ -5,13 +5,13 @@ description: Build the Linux kernel, device tree blobs, and U-Boot boot binaries
 
 # Build kernel, DTBs and U-Boot from the SDK
 
-Device values come from `Rules.make` through `lib/ti-sdk-env.sh` (see `ti-sdk-setup`); the list of
+Device values come from `Rules.make` through `scripts/ti-sdk-env.sh` (see `ti-sdk-setup`); the list of
 targets and boot files for your device is in `$TI_KB` / `$TI_FACTS_JSON` (run `ti-generate-kb` if
 unset). The makerules differ per SoC, so read them before choosing targets (step 1).
 
 ## Docs (MCP)
 
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`,
+Follow [references/mcp-usage.md](references/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`,
 `os="linux"`, `version=$TI_SDK_VERSION_DOCS` (or `latest` if `list_versions` lacks it; say that
 the page may lag the SDK) on every call. The SDK makerules win over a page; report both.
 
@@ -24,7 +24,10 @@ the page may lag the SDK) on every call. The SDK makerules win over a page; repo
 
 ## Prerequisites
 
-- `ti-sdk-setup` done: `source lib/ti-sdk-env.sh` works and `check-sdk.sh` (in `ti-sdk-setup`) passes.
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
+- `ti-sdk-setup` done: `source scripts/ti-sdk-env.sh` works and `check-sdk.sh` (in `ti-sdk-setup`) passes.
 - Run `make` from the SDK root in a clean shell: do NOT source `linux-devkit/environment-setup`
   (docs: the kernel target breaks when it is sourced).
 - `MAKE_JOBS` is set in `Rules.make`; override with `make MAKE_JOBS=<n> <target>`.
@@ -33,7 +36,7 @@ the page may lag the SDK) on every call. The SDK makerules win over a page; repo
 
 1. Discover what this SDK builds (read-only), then preview a target (no side effects):
    ```bash
-   source <skills-root>/lib/ti-sdk-env.sh && cd "$TI_SDK_ROOT"
+   source scripts/ti-sdk-env.sh && cd "$TI_SDK_ROOT"
    grep -hoE '^[a-z0-9_-]+:' makerules/Makefile_linux makerules/Makefile_linux-dtbs makerules/Makefile_u-boot | tr -d : | sort -u
    grep -n 'defconfig\|zImage\|Image' makerules/Makefile_linux      # kernel config and image targets
    make -n u-boot | head -20

@@ -14,7 +14,7 @@ tree is `board-support/ti-linux-kernel-*` and the cross compiler is the one name
 A module only loads on a kernel whose release string matches the one it was built against (see Step 2).
 
 ## Docs (MCP)
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`, `os="linux"`,
+Follow [references/mcp-usage.md](references/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`, `os="linux"`,
 `version=$TI_SDK_VERSION_DOCS` explicitly (empty `$TI_DOCS_DEVICE`: key from `$TI_KB` or `ti_processor_sdk_docs_list_variants`).
 If `ti_processor_sdk_docs_list_versions(device)` lacks your version, use `latest` and say the MCP lags the SDK. Cite the doc `path` you used.
 - `ti_processor_sdk_docs_search(query="Kernel Users Guide compiling the kernel modules", ...)` -> `linux/Foundational_Components_Kernel_Users_Guide.html` (cross compile setup, `modules`, `modules_install`, `INSTALL_MOD_PATH`)
@@ -24,7 +24,10 @@ If `ti_processor_sdk_docs_list_versions(device)` lacks your version, use `latest
 Kbuild rules themselves are in the SDK kernel tree: `Documentation/kbuild/modules.rst`.
 
 ## Prerequisites
-- `lib/ti-sdk-env.sh` sourced: `TI_SDK_ROOT`, `TI_ARCH`, `TI_CROSS_COMPILE` (from `Rules.make`: `ARCH`, `CROSS_COMPILE`).
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
+- `scripts/ti-sdk-env.sh` sourced: `TI_SDK_ROOT`, `TI_ARCH`, `TI_CROSS_COMPILE` (from `Rules.make`: `ARCH`, `CROSS_COMPILE`).
 - A clean shell: do not source the devkit `environment-setup*` file. The TI kernel guide says doing so
   makes host-side kernel components fail to compile; `scripts/build-module.sh` refuses if it is sourced.
 - The SDK kernel tree must be configured and built (`.config`, `include/generated/autoconf.h`; a full build

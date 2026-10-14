@@ -15,7 +15,7 @@ exist, what firmware name each requests, and which ones Linux may touch differ p
 the SDK device tree and from the board.
 
 ## Docs (MCP)
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md). Always pass `device=$TI_DOCS_DEVICE`,
+Follow [references/mcp-usage.md](references/mcp-usage.md). Always pass `device=$TI_DOCS_DEVICE`,
 `os="linux"`, and `version=$TI_SDK_VERSION_DOCS`. Never rely on the default device (the MCP default is not yours). If `$TI_DOCS_DEVICE` is empty take
 the key from `$TI_KB` or `ti_processor_sdk_docs_list_variants`. If `ti_processor_sdk_docs_list_versions(device)` lacks your version (example, checked
 12.02: the AM62PX docs list up to 12.01), use `version="latest"` and say the page may differ from the SDK. Cite the doc `path` you used.
@@ -29,7 +29,10 @@ Queries that worked (e.g. AM62PX, AM62X, AM64X each have a page; AM62LX returned
 If a doc page and the SDK or board disagree, report both (the docs examples are taken from other SDK releases).
 
 ## Prerequisites
-- SDK installed; `lib/ti-sdk-env.sh` exported `TI_SDK_ROOT`, `TI_SOC`, `TI_DOCS_DEVICE`, `TI_KB`, `TI_FACTS_JSON`.
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
+- SDK installed; `scripts/ti-sdk-env.sh` exported `TI_SDK_ROOT`, `TI_SOC`, `TI_DOCS_DEVICE`, `TI_KB`, `TI_FACTS_JSON`.
 - For board steps: root ssh to the board (`ssh root@<board-ip>`), debugfs mounted for traces.
 - `dtc` on the host for `scripts/dt-cores.sh` (the board image used for verification also had it).
 - Per-device facts (default board DTB, core list, firmware names): read `$TI_KB` / `$TI_FACTS_JSON`; if unset or the file is

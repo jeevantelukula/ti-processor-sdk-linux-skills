@@ -14,7 +14,7 @@ TI documents one flow: clone `oe-layersetup`, generate the layers from a release
 the build environment, run `bitbake` for a machine and image target.
 
 ## Docs (MCP)
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`, `os="linux"`,
+Follow [references/mcp-usage.md](references/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`, `os="linux"`,
 `version=$TI_SDK_VERSION_DOCS` if `ti_processor_sdk_docs_list_versions` has it, else `latest`. The MCP lags
 the SDK and the layer configuration page is release specific, so say which release you read; the SDK
 (`Rules.make`, `yocto-build/` if shipped) wins over the page. Cite the page path you used.
@@ -27,7 +27,10 @@ the SDK and the layer configuration page is release specific, so say which relea
 - `query="Release Notes"` -> release-specific notes for the SDK you target
 
 ## Prerequisites
-- `lib/ti-sdk-env.sh` exported `TI_DOCS_DEVICE`; the machine name is `YOCTO_MACHINE` in the SDK `Rules.make`
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
+- `scripts/ti-sdk-env.sh` exported `TI_DOCS_DEVICE`; the machine name is `YOCTO_MACHINE` in the SDK `Rules.make`
   (`PLATFORM` if it is absent: an ADAS SDK checked defines only `PLATFORM`). `$TI_KB` (run `ti-generate-kb`
   if unset) records both. Docs list the supported `MACHINE` values per device.
 - Host that passes `scripts/check-host.sh <build-dir>` (OS, `/bin/sh`, packages, locale, RAM/swap, disk).

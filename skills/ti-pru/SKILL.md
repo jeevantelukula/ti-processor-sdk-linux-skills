@@ -13,7 +13,7 @@ Linux loads PRU firmware through the same `remoteproc` sysfs interface as other 
 using the `pruss` and `pru_rproc` drivers. Whether a SoC has PRU cores at all is decided by its device tree.
 
 ## Docs (MCP)
-Follow [../../context/mcp-usage.md](../../context/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`, `os="linux"`,
+Follow [references/mcp-usage.md](references/mcp-usage.md): pass `device=$TI_DOCS_DEVICE`, `os="linux"`,
 `version=$TI_SDK_VERSION_DOCS` explicitly (empty `$TI_DOCS_DEVICE`: key from `$TI_KB` or `ti_processor_sdk_docs_list_variants`). If
 `ti_processor_sdk_docs_list_versions(device)` lacks your version (the MCP lags new SDKs), use `version="latest"` and say so. Cite the doc
 `path` you used. PRU docs matter only for devices whose DT has PRU cores (gate in Step 1 first): searches (e.g. AM62X, AM64X)
@@ -27,7 +27,10 @@ Warning: the "RPMsg Quick Start Guide" and "PRU Hands-on Labs" pages are written
 for concepts, take names and ids from your own board.
 
 ## Prerequisites
-- `lib/ti-sdk-env.sh` exported `TI_SDK_ROOT`, `TI_SOC`, `TI_DOCS_DEVICE`, `TI_KB`, `TI_FACTS_JSON` (board DTB name, PRU instance list: read
+- Paths here are relative to this skill's directory. Shell variables do not persist between commands: run
+  `source scripts/ti-sdk-env.sh >/dev/null &&` in the same command as anything that uses `$TI_*` (the
+  bundled scripts load it themselves).
+- `scripts/ti-sdk-env.sh` exported `TI_SDK_ROOT`, `TI_SOC`, `TI_DOCS_DEVICE`, `TI_KB`, `TI_FACTS_JSON` (board DTB name, PRU instance list: read
   `$TI_KB`; if unset or missing, run skill `ti-generate-kb`).
 - `dtc` on the host. PRU code generation tools (`clpru`): not in the SDK devkit (see Step 3).
 - Board access as root over ssh for loading.
@@ -40,14 +43,14 @@ for concepts, take names and ids from your own board.
    ```
    No built DTB: compile the board DTS to /tmp as shown in `ti-remoteproc` Step 1.
    Exit 3 and "no PRU support" -> stop and tell the user this SoC has none. Example, checked on SDK 12.02 kernel DTS: AM62x SK (2 PRU) and AM64x EVM
-   (2 ICSSG, each PRU/RTU/TX_PRU x2) pass; AM62P, AM62A, AM62D and AM62L exit 3. The script reuses `../ti-remoteproc/scripts/dt-cores.sh`
+   (2 ICSSG, each PRU/RTU/TX_PRU x2) pass; AM62P, AM62A, AM62D and AM62L exit 3. The script uses `scripts/dt-cores.sh` (bundled copy of the `ti-remoteproc` script)
    and prints a NOTE when PRU nodes exist but none is `okay` (enable them in the board DTS first).
    A `status` other than `okay`, or an Ethernet node whose own `firmware-name` lists `ti-pruss/...-prueth-fw.elf`
    (e.g. seen on the AM64x EVM DTB, node `icssg1-eth`), means the board or another driver may own those cores.
 
 2. Map PRU cores to remoteproc ids on the board (docs, Lab 4):
    ```
-   ssh root@<board-ip> 'bash -s -- list' < ../ti-remoteproc/scripts/rproc.sh
+   ssh root@<board-ip> 'bash -s -- list' < scripts/rproc.sh
    ```
    PRU instances have names like `<addr>.pru`, addr = parent base + unit address from Step 1 (e.g. AM62x DTS `pruss@30040000/pru@34000`
    is `30074000.pru`; the AM62X docs list `30074000.pru` / `30078000.pru`). Docs
@@ -78,7 +81,7 @@ for concepts, take names and ids from your own board.
    on the target, then
    ```
    scp gen/<example>.out root@<board-ip>:/lib/firmware/pru/
-   ssh root@<board-ip> 'bash -s -- load remoteprocN pru/<example>.out' < ../ti-remoteproc/scripts/rproc.sh
+   ssh root@<board-ip> 'bash -s -- load remoteprocN pru/<example>.out' < scripts/rproc.sh
    ```
    `load` stops a running core first; docs say PRUs must be stopped before new firmware is loaded. The firmware
    path is relative to `/lib/firmware`.
