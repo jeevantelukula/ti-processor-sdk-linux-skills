@@ -92,7 +92,7 @@ Not build-tested for a renamed board in this skill (only the reference structure
 List what your SDK built: `ls $TI_SDK_ROOT/board-support/built-images`. Example from AM62P SDK 12.02.00.01.01 (yours will differ): it had `tiboot3-<soc>-hs-evm.bin`,
 `...-hs-fs-evm.bin` and `tiboot3.bin`; the docs migration page mentions a `gp` variant for GP devices and says HS-FS is the default, which that
 build did not show - report any such mismatch with the docs path. Which variant matches your silicon: the migration guide above and the device marking.
-Never mix boot binaries from different SDK releases.
+Keep `tiboot3.bin`, `tispl.bin` and `u-boot.img` from one build: a precaution, not a documented rule (see `ti-boot-chain` Verify).
 
 ## Verify
 1. Kernel: `make linux-dtbs` produces `<new>.dtb`; `dtc -I dtb -O dts` shows your `model`.

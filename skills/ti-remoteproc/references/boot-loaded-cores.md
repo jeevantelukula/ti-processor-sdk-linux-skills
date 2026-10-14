@@ -22,7 +22,7 @@ cp <new-firmware> <TI_DM path of the variant you build>      # back up the origi
 make -C "$TI_SDK_ROOT" u-boot                    # builds R5 and A53 U-Boot
 ```
 `makerules/Makefile_u-boot` writes the A53 build to `board-support/u-boot-build/a53/` (`tispl.bin`
-included) and `make u-boot_stage` copies it to `board-support/built-images/`. Never mix `tispl.bin` and
-`tiboot3.bin` from different SDK releases; see `ti-boot-chain`.
+included) and `make u-boot_stage` copies it to `board-support/built-images/`. Deploy the new `tispl.bin`
+together with the `tiboot3.bin` of the same build (a precaution, not a documented rule; see `ti-boot-chain`).
 The docs say this firmware runs the device manager (SciServer). Replace it only with firmware that still
 provides it, confirm with the user, and keep a known-good `tispl.bin`.
