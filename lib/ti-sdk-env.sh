@@ -24,6 +24,18 @@ _ti_env_warn() { printf 'ti-sdk-env: %s\n' "$*" >&2; }
 
 _ti_env_is_sdk() { [ -f "$1/Rules.make" ] && [ -d "$1/board-support" ]; }
 
+# Nearest ancestor of this file named .claude (e.g. <workspace>/.claude when the file is
+# <workspace>/.claude/skills/<skill>/scripts/ti-sdk-env.sh); empty if there is none.
+# Each skill bundles its own copy of this file, so it must not assume where it lives.
+_ti_env_claude_dir() {
+    local d
+    d=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd) || return 0
+    while [ -n "$d" ] && [ "$d" != "/" ]; do
+        [ "$(basename "$d")" = ".claude" ] && { printf '%s\n' "$d"; return 0; }
+        d=$(dirname "$d")
+    done
+}
+
 _ti_env_discover() {
     local d
     for d in "${TI_SDK_ROOT:-}" "${PROCESSOR_SDK_LINUX:-}"; do
@@ -37,10 +49,11 @@ _ti_env_discover() {
         if _ti_env_is_sdk "$d"; then printf '%s\n' "$d"; return 0; fi
         d=$(dirname "$d")
     done
-    # Installed workspace: sdk.root from target-profile.yaml (written by install.sh).
-    local here p r
-    here=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)
-    for p in "$PWD/.claude/target-profile.yaml" "$here/../target-profile.yaml"; do
+    # Installed workspace: sdk.root from target-profile.yaml (written by install.sh), in
+    # ./.claude/ first, then in the .claude/ this file is installed under.
+    local p r cdir
+    cdir=$(_ti_env_claude_dir)
+    for p in "$PWD/.claude/target-profile.yaml" "${cdir:+$cdir/target-profile.yaml}"; do
         [ -f "$p" ] || continue
         r=$(awk '/^sdk:/{s=1;next} s&&/^[^ ]/{s=0} s&&$1=="root:"{sub(/^[^:]*:[ ]*/,"");sub(/[ ]*#.*/,"");print;exit}' "$p")
         if [ -n "$r" ] && _ti_env_is_sdk "$r"; then (cd "$r" && pwd); return 0; fi
@@ -111,8 +124,8 @@ _ti_env_grep_rules() {
 
 # Docs MCP device key from PLATFORM: take the part before the first '-' (board suffix such as
 # -evm/-sk), uppercase, drop trailing 'XX' suffix when present. Checked against
-# ti_processor_sdk_docs_list_variants: am62pxx->AM62PX, am62xx->AM62X, am62lxx->AM62LX,
-# am62axx->AM62AX, am62dxx->AM62DX, am64xx->AM64X, am335x->AM335X. The result is a candidate:
+# ti_processor_sdk_docs_list_variants, e.g.: am62pxx->AM62PX, am62xx->AM62X, am62lxx->AM62LX,
+# e.g. am62axx->AM62AX, am62dxx->AM62DX, am64xx->AM64X, am335x->AM335X. The result is a candidate:
 # if list_variants does not list it, ask the user.
 _ti_env_docs_device() {
     local k=${1%%-*}
@@ -123,7 +136,7 @@ _ti_env_docs_device() {
 }
 
 _ti_env_main() {
-    local root line key val ver dir lib_dir ws
+    local root line key val ver dir
     root=$(_ti_env_discover) || {
         _ti_env_warn "no SDK found. Set TI_SDK_ROOT (or PROCESSOR_SDK_LINUX) to the SDK directory, or cd into it."
         return 1
@@ -179,14 +192,20 @@ _ti_env_main() {
     TI_DOCS_DEVICE=$(_ti_env_docs_device "$TI_PLATFORM")
     [ -n "$TI_DOCS_DEVICE" ] || _ti_env_warn "cannot derive docs MCP device key from PLATFORM '$TI_PLATFORM'; ask the user or call ti_processor_sdk_docs_list_variants"
 
-    # Generated facts (lib/gen-sdk-facts.py): TI_FACTS_DIR > <workspace>/.claude/target-platform > ./target-platform
-    lib_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    # Generated facts (skill ti-generate-kb). TI_FACTS_DIR if set; else an existing
+    # ./.claude/target-platform, then one under the .claude/ this file is installed in;
+    # else where it would be created: ./.claude/, the installed .claude/, or ./target-platform.
+    local cdir
+    cdir=$(_ti_env_claude_dir)
     if [ -z "${TI_FACTS_DIR:-}" ]; then
-        ws=$(dirname "$(dirname "$lib_dir")")
-        if [ "$(basename "$(dirname "$lib_dir")")" = ".claude" ]; then
-            TI_FACTS_DIR=$ws/.claude/target-platform
-        elif [ -d "$PWD/.claude/target-platform" ]; then
+        if [ -d "$PWD/.claude/target-platform" ]; then
             TI_FACTS_DIR=$PWD/.claude/target-platform
+        elif [ -n "$cdir" ] && [ -d "$cdir/target-platform" ]; then
+            TI_FACTS_DIR=$cdir/target-platform
+        elif [ -d "$PWD/.claude" ]; then
+            TI_FACTS_DIR=$PWD/.claude/target-platform
+        elif [ -n "$cdir" ]; then
+            TI_FACTS_DIR=$cdir/target-platform
         else
             TI_FACTS_DIR=$PWD/target-platform
         fi
@@ -196,7 +215,7 @@ _ti_env_main() {
         [ -f "$TI_FACTS_DIR/$TI_PLATFORM.md" ] && TI_KB=$TI_FACTS_DIR/$TI_PLATFORM.md
         [ -f "$TI_FACTS_DIR/$TI_PLATFORM.json" ] && TI_FACTS_JSON=$TI_FACTS_DIR/$TI_PLATFORM.json
     fi
-    [ -n "$TI_KB" ] || _ti_env_warn "no generated facts for '$TI_PLATFORM' in $TI_FACTS_DIR; run: python3 $lib_dir/gen-sdk-facts.py (skill ti-generate-kb)"
+    [ -n "$TI_KB" ] || _ti_env_warn "no generated facts for '$TI_PLATFORM' in $TI_FACTS_DIR; run the ti-generate-kb skill (scripts/gen-sdk-facts.py)"
 
     export TI_SDK_VERSION TI_SDK_VERSION_DOCS TI_SOC TI_PLATFORM TI_ARCH \
            TI_UBOOT_MACHINE TI_UBOOT_MACHINE_R5 TI_DTB_PREFIX TI_CROSS_COMPILE \
@@ -206,6 +225,7 @@ _ti_env_main() {
 
 _ti_env_main
 _ti_env_rc=$?
-unset -f _ti_env_main _ti_env_docs_device _ti_env_discover _ti_env_eval_rules _ti_env_grep_rules _ti_env_is_sdk
+unset -f _ti_env_main _ti_env_docs_device _ti_env_discover _ti_env_eval_rules _ti_env_grep_rules _ti_env_is_sdk \
+    _ti_env_claude_dir
 # shellcheck disable=SC2317
 return "$_ti_env_rc" 2>/dev/null || exit "$_ti_env_rc"
