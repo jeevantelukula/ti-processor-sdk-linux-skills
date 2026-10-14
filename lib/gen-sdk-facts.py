@@ -497,7 +497,7 @@ def extract_dt(root, src_find):
     regs = []
     for r in rm:
         for c in r.children:
-            rr = reg_decode(r, c.cells("reg"))
+            rr = reg_decode(c, c.cells("reg"))  # cells come from c.parent (= r)
             if not rr and c.cells("size"):
                 rr = [{"addr": "dynamic (alloc-ranges)", "size": "0x%x" % c.cells("size")[-1]}]
             s = None
@@ -705,7 +705,8 @@ def main():
         rep.add("dt_identity", "Board device tree",
                 {"dts": dts_rel, "selection_rule": rule_txt, "model": dtinfo["model"],
                  "compatible": dtinfo["compatible"], "cpus": dtinfo["cpus"],
-                 "include_closure": [rel(f, kernel) for f in closure if not f.startswith(kernel + "/include/")]},
+                 "include_closure": [rel(f, kernel or os.path.dirname(dts_path)) for f in closure
+                                     if not (kernel and f.startswith(kernel + "/include/"))]},
                 sel_ev + [dts_rel], None)
         rp = dtinfo["remoteprocs"]
         rep.add("remoteprocs", "Remote processors (nodes with firmware-name or core-like compatible)",
