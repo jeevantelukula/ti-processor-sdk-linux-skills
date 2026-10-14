@@ -71,13 +71,40 @@ __ti_print:
 EOF
 }
 
-# Fallback when make is missing or fails: plain-text lookup (no expansion).
+# Fallback when make is missing or fails: a small subset of make, enough for Rules.make.
+# Handles 'VAR = v', 'VAR := v', 'VAR ?= v' (optionally 'export'), $(VAR) / ${VAR}
+# references, and the $(shell ls -d <glob>) form Rules.make uses for source directories.
+# Not handled: conditionals (ifeq ...), other $(function ...) calls, line continuations.
+# Values that still contain '$(' are reported and left empty.
 _ti_env_grep_rules() {
-    local root=$1 k v
-    for k in SOC PLATFORM ARCH UBOOT_MACHINE UBOOT_MACHINE_R5 \
-             KERNEL_DEVICETREE_PREFIX CROSS_COMPILE; do
-        v=$(sed -n -E "s/^(export[[:space:]]+)?${k}[[:space:]]*\??=[[:space:]]*//p" \
-            "$root/Rules.make" | head -n1)
+    local root=$1 line name op val k v n pat
+    local -A vars=()
+    local re='^(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*([?:]?)=[[:space:]]*(.*)$'
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ $line =~ $re ]] || continue
+        name=${BASH_REMATCH[2]} op=${BASH_REMATCH[3]} val=${BASH_REMATCH[4]}
+        val=${val%"${val##*[![:space:]]}"}
+        [[ $op == "?" && -n ${vars[$name]+set} ]] && continue
+        vars[$name]=$val
+    done < "$root/Rules.make"
+    vars[TI_SDK_PATH]=$root     # same override as the make path (relocated SDKs)
+
+    for k in SOC PLATFORM ARCH UBOOT_MACHINE UBOOT_MACHINE_R5 KERNEL_DEVICETREE_PREFIX \
+             CROSS_COMPILE CROSS_COMPILE_ARMV7 LINUXKERNEL_INSTALL_DIR UBOOT_SRC_DIR; do
+        v=${vars[$k]-}
+        for ((n = 0; n < 20; n++)); do     # expand $(VAR) / ${VAR}, nested ones included
+            [[ $v =~ \$[\(\{]([A-Za-z_][A-Za-z0-9_]*)[\)\}] ]] || break
+            v=${v//"${BASH_REMATCH[0]}"/${vars[${BASH_REMATCH[1]}]-}}
+        done
+        if [[ $v =~ ^\$\(shell[[:space:]]+ls[[:space:]]+-d[[:space:]]+([^\)]+)\)$ ]]; then
+            pat=${BASH_REMATCH[1]}
+            v=$(compgen -G "$pat" | sort | tr '\n' ' ')
+            v=${v% }
+        fi
+        if [[ $v == *'$('* || $v == *'${'* ]]; then
+            _ti_env_warn "Rules.make: cannot expand $k without make ('${vars[$k]}'); left empty"
+            v=
+        fi
         printf '%s=%s\n' "$k" "$v"
     done
 }
@@ -110,7 +137,7 @@ _ti_env_main() {
     local parsed
     parsed=$(_ti_env_eval_rules "$root") || parsed=
     if [ -z "$parsed" ]; then
-        _ti_env_warn "could not evaluate Rules.make with make; falling back to text parsing (variables are not expanded)"
+        _ti_env_warn "could not evaluate Rules.make with make; falling back to text parsing (simple assignments and \$(VAR) only)"
         parsed=$(_ti_env_grep_rules "$root")
     fi
     while IFS= read -r line; do
