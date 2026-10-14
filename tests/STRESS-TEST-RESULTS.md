@@ -8,32 +8,38 @@
 **Date:** 2026-10-13  
 **Board IP:** 10.24.50.188 (connected, booted from SD)
 
+> Corrected 2026-10-15: statuses that contradicted the repo were fixed and two host-only queries were run.
+> Every change is listed under [Corrections](#corrections-2026-10-15) at the end.
+
 ---
 
 ## Test Summary
 
-| Skill | Total Queries | Pass | Fail | Partial | Blocked (needs hardware) |
-|-------|--------------|------|------|---------|--------------------------|
-| ti-sdk-quick-start | 6 | 4 | 0 | 0 | 2 |
+| Skill | Total Queries | Pass | Fail | Partial | Not run |
+|-------|--------------|------|------|---------|---------|
+| ti-sdk-quick-start | 6 | 5 | 0 | 0 | 1 |
 | ti-sdk-setup | 6 | 6 | 0 | 0 | 0 |
 | ti-generate-kb | 8 | 8 | 0 | 0 | 0 |
-| ti-build-source | 8 | 7 | 0 | 1 | 0 |
-| ti-deploy-image | 8 | 4 | 0 | 1 | 3 |
-| ti-boot-chain | 8 | 3 | 0 | 0 | 5 |
-| ti-gpio-pinmux | 8 | 5 | 0 | 0 | 3 |
-| ti-device-tree-overlay | 7 | 3 | 0 | 0 | 4 |
+| ti-build-source | 8 | 6 | 0 | 1 | 1 |
+| ti-deploy-image | 8 | 5 | 0 | 0 | 3 |
+| ti-boot-chain | 8 | 8 | 0 | 0 | 0 |
+| ti-gpio-pinmux | 8 | 4 | 0 | 0 | 4 |
+| ti-device-tree-overlay | 7 | 2 | 0 | 0 | 5 |
 | ti-custom-board-port | 6 | 0 | 0 | 0 | 6 |
-| ti-remoteproc | 8 | 7 | 0 | 1 | 0 |
+| ti-remoteproc | 8 | 8 | 0 | 0 | 0 |
 | ti-pru | 7 | 1 | 0 | 0 | 6 |
-| ti-kernel-module | 6 | 1 | 0 | 1 | 4 |
+| ti-kernel-module | 6 | 1 | 0 | 0 | 5 |
 | ti-customize-clocks | 8 | 6 | 0 | 0 | 2 |
-| ti-resource-partition | 6 | 4 | 0 | 0 | 2 |
+| ti-resource-partition | 6 | 5 | 0 | 0 | 1 |
 | ti-yocto-build | 6 | 0 | 0 | 0 | 6 |
 | ti-yocto-custom-dt | 5 | 0 | 0 | 0 | 5 |
-| ti-diagnostic | 7 | 7 | 0 | 0 | 0 |
-| Cross-Skill | 8 | 2 | 0 | 0 | 6 |
-| Adversarial | 10 | 3 | 0 | 1 | 6 |
-| **TOTAL** | **133** | **79** | **0** | **3** | **51** |
+| ti-diagnostic | 9 | 9 | 0 | 0 | 0 |
+| Cross-Skill | 8 | 3 | 0 | 0 | 5 |
+| Adversarial | 10 | 4 | 0 | 2 | 4 |
+| **TOTAL** | **138** | **81** | **0** | **3** | **54** |
+
+Counted from the detail rows below (the earlier table did not match them). "Not run" was "Blocked (needs hardware)". It mixes three reasons: needs a board or destructive action, needs
+another SDK, or host-only work that was simply not executed. The notes say which.
 
 ---
 
@@ -48,7 +54,7 @@
 | 1.3 | "I don't know my security mode. How do I find it?" | Pass | Uses docs MCP (Secure Boot, Migration Guide) - UART boot mode + uart-parser script |
 | 1.4 | "I only want to build, no board. Skip deploy questions." | Pass | Router accepts board.ip=none, routes to build phase |
 | 1.5 | "Route me to the skill that builds a kernel module." | Pass | Routes to ti-kernel-module |
-| 1.6 | "I have an AM62P board but the SDK is AM64x. What happens?" | Blocked | Need AM64x SDK to test mismatch detection |
+| 1.6 | "I have an AM62P board but the SDK is AM64x. What happens?" | Not run | Need AM64x SDK to test mismatch detection |
 
 ### 2. ti-sdk-setup (Environment & Host Check)
 
@@ -84,7 +90,7 @@
 | 4.4 | "Build U-Boot for R5 only. Then for A53." | Pass | R5: tiboot3-hs/fs/evm/capsule.bin in u-boot-build/r5/; A53: tispl.bin (1.4MB), u-boot.img (1.5MB) in u-boot-build/a53/ |
 | 4.5 | "What defconfig does this SDK use? Where is it?" | Pass | Kernel: defconfig + ti_arm64_prune.config (fragments in kernel/configs/); U-Boot A53: am62px_evm_a53_defconfig; R5: am62px_evm_r5_defconfig |
 | 4.6 | "Build with 16 jobs. Show me the staged outputs." | Partial | MAKE_JOBS=32 in Rules.make; override with `make MAKE_JOBS=16`. Stage: `make u-boot_stage linux_stage` → built-images/ |
-| 4.7 | "I'm on an AM335x SDK. What targets exist?" | Blocked | Need AM335x SDK to test |
+| 4.7 | "I'm on an AM335x SDK. What targets exist?" | Not run | Need AM335x SDK to test |
 | 4.8 | "Cross-compile a hello-world to verify toolchain." | Pass | Both toolchains verified via check-sdk.sh gcc --version |
 
 ### 5. ti-deploy-image (SD / eMMC / Network Boot)
@@ -93,12 +99,12 @@
 |---|-------|--------|-------|
 | 5.1 | "Create a bootable SD card from prebuilt images." | Pass | `create-sdcard.sh` interactive; user ran manually (sudo); SD card /dev/sdc flashed; board boots |
 | 5.2 | "I already have an SD card. Update only kernel and DTBs." | Pass | `sudo make DESTDIR=<rootfs-mount> linux_install` + `sudo make DESTDIR=<boot-mount> u-boot_install` |
-| 5.3 | "Flash my built images to eMMC boot0 partition." | Blocked | No eMMC on AM62P5 SK; would need `flash-emmc-boot0.sh` with dry-run |
-| 5.4 | "Boot kernel over TFTP, rootfs over NFS." | Blocked | Network boot not tested; requires `setup-tftp.sh`, `setup-targetfs-nfs.sh` |
+| 5.3 | "Flash my built images to eMMC boot0 partition." | Not run | Destructive, not executed. The board has eMMC (`mmcblk0` with `boot0`/`boot1`, see `ti-deploy-image/references/emmc.md`); `flash-emmc-boot0.sh` was run with `--dry-run` only |
+| 5.4 | "Boot kernel over TFTP, rootfs over NFS." | Not run | Network boot not tested; requires `setup-tftp.sh`, `setup-targetfs-nfs.sh` |
 | 5.5 | "Which tiboot3 variant do I need for HS-FS silicon?" | Pass | `tiboot3-am62px-hs-fs-evm.bin` (default tiboot3.bin is byte-identical to this) |
 | 5.6 | "The SDK has no GP tiboot3 but docs mention it. Explain." | Pass | Migration Guide: SDK 12.02 default = HS-FS; GP variant would be tiboot3-am62px-gp-evm.bin (not in SDK 12.02 built-images) |
 | 5.7 | "Set up U-Boot env so my custom DTB loads on boot." | Pass | `uEnv.txt` on boot partition: `name_overlays=<overlay.dtbo>`; or `setup-uboot-env.sh` for network |
-| 5.8 | "Deploy to a second board with different security mode." | Blocked | Need second board with different security mode |
+| 5.8 | "Deploy to a second board with different security mode." | Not run | Need second board with different security mode |
 
 ### 6. ti-boot-chain (Boot Flow, Security, Verification)
 
@@ -117,37 +123,37 @@
 
 | # | Query | Result | Notes |
 |---|-------|--------|-------|
-| 7.1 | "Decode `AM64X_IOPAD(0x0048, PIN_OUTPUT, 3)`. What pin, what signal?" | Blocked | AM64X macro not on AM62P; need AM64x board |
+| 7.1 | "Decode `AM64X_IOPAD(0x0048, PIN_OUTPUT, 3)`. What pin, what signal?" | Not run | Host-only: every `*_IOPAD` macro is defined in the single `k3-pinctrl.h` of the SDK kernel (see `ti-gpio-pinmux` step 1), so the AM62P SDK can answer it; pad/ball names need the AM64x datasheet |
 | 7.2 | "List every GPIO chip on my board and which lines are free." | Pass | 4 chips: gpiochip0/3 (I2C expanders, 24 lines each), gpiochip1 (600000.gpio, 92 lines, 1 used), gpiochip2 (601000.gpio, 52 lines, 11 kernel + 1 LED) |
-| 7.3 | "Toggle GPIO line 12 on chip 600000.gpio safely." | Pass | Used free line 8: read=1, write 0 (3s), read=0, write 1 (3s), read=1; gpio-test.sh wrapper works |
+| 7.3 | "Toggle GPIO line 12 on chip 600000.gpio safely." | Not run | Result withdrawn: recorded as Pass, but `write` then used `gpioset -z`, which leaves the line requested after the script exits (fixed in f360c17), so the recorded read-backs do not fit that code. Re-run on hardware |
 | 7.4 | "Find all pads using offset 0x01e0 in the board DTS." | Pass | Found in k3-am62p5-sk.dts:260: `AM62PX_IOPAD(0x01e0, PIN_INPUT_PULLUP, 0) /* (B25) I2C0_SCL */` |
 | 7.5 | "Dump all 200+ pad registers from debugfs and decode them." | Pass | 206 pins decoded from 2 controllers (MCU @4084000, main @f4000); shows MUX, PULLUDEN, DS bits |
-| 7.6 | "I'm on AM62P but used AM62X_IOPAD. Catch the error." | Blocked | Macro gating: AM62PX_IOPAD vs AM62X_IOPAD are different headers |
+| 7.6 | "I'm on AM62P but used AM62X_IOPAD. Catch the error." | Not run | Host-only: both macros are in the same `k3-pinctrl.h`; the check is which macro the board DTS uses (`ti-gpio-pinmux` step 1) |
 | 7.7 | "Show me the PIN_* macro values from k3-pinctrl.h." | Pass | 47 macros listed: PIN_OUTPUT=0x00010000, PIN_INPUT=0x00054000, PIN_INPUT_PULLUP=0x00064000, PIN_INPUT_PULLDOWN=0x00044000, PIN_OUTPUT_PULLUP=0x00020000, etc. |
-| 7.8 | "Which mux mode gives me GPIO on ball B25?" | Blocked | TRM/PinMux tool reference; needs specific board pinout |
+| 7.8 | "Which mux mode gives me GPIO on ball B25?" | Not run | TRM/PinMux tool reference; needs specific board pinout |
 
 ### 8. ti-device-tree-overlay (DTBO Build, Test-Apply, Enable)
 
 | # | Query | Result | Notes |
 |---|-------|--------|-------|
-| 8.1 | "Build the PWM overlay for the RPi header and test-apply it." | Blocked | Needs hardware to test-apply; SDK has `k3-am62p5-sk-rpi-hdr-ehrpwm.dtso` |
-| 8.2 | "Create an overlay that enables UART4 on the expansion header." | Blocked | Custom overlay from scratch needs hardware validation |
-| 8.3 | "My overlay has a bad label. Show me the error." | Blocked | `FDT_ERR_NOTFOUND` handling needs hardware |
+| 8.1 | "Build the PWM overlay for the RPi header and test-apply it." | Not run | Host-only: `build-dtbo.sh <dtso> -b <base.dtb>` builds and test-applies with `fdtoverlay`, no board needed (the skill reports doing this for `k3-am62p5-sk-rpi-hdr-ehrpwm.dtso`); not run in this session |
+| 8.2 | "Create an overlay that enables UART4 on the expansion header." | Not run | Writing, building and test-applying are host-only; only the boot test needs the board |
+| 8.3 | "My overlay has a bad label. Show me the error." | Not run | Host-only: `build-dtbo.sh -b` fails with `FDT_ERR_NOTFOUND` (as recorded in `ti-device-tree-overlay` Troubleshooting); not run in this session |
 | 8.4 | "Enable the overlay in U-Boot via uEnv.txt." | Pass | `name_overlays=ti/<overlay>.dtbo` in uEnv.txt on boot partition; U-Boot `get_overlay_mmc` applies |
 | 8.5 | "Does this board support runtime configfs overlays?" | Pass | `CONFIG_OF_OVERLAY=y` but `CONFIG_OF_CONFIGFS` not set → no `/sys/kernel/config/device-tree/`; U-Boot-time overlays only |
-| 8.6 | "Overlay disables DSS. Show me the conflict comment." | Blocked | SDK overlays have conflict comments in DTS (e.g. `k3-am62p5-sk-rpi-hdr-ehrpwm.dtso` disables `&dss0`) |
-| 8.7 | "Build all SDK overlays and verify each applies cleanly." | Blocked | Batch validation needs hardware |
+| 8.6 | "Overlay disables DSS. Show me the conflict comment." | Not run | Host-only: read the `.dtso` (e.g. `k3-am62p5-sk-rpi-hdr-ehrpwm.dtso` disables `&dss0`) |
+| 8.7 | "Build all SDK overlays and verify each applies cleanly." | Not run | Host-only: loop `build-dtbo.sh -b` over the SDK `.dtso` files; no board needed |
 
 ### 9. ti-custom-board-port (New Board Bring-Up)
 
 | # | Query | Result | Notes |
 |---|-------|--------|-------|
-| 9.1 | "I designed a custom board based on AM64x EVM. Dry-run the port." | Blocked | Need AM64x SDK for this test |
-| 9.2 | "List every U-Boot and kernel file that references the reference board." | Blocked | Reference scanning needs target SDK |
-| 9.3 | "Apply the copy to my new board directory." | Blocked | `--apply` with no overwrite needs hardware |
-| 9.4 | "My board has different DDR. Which files must I edit?" | Blocked | DDR/PMIC/PHY guidance needs specific board |
-| 9.5 | "No R5 on my SoC. Skip the R5 steps." | Blocked | SoC-specific gating needs target SDK |
-| 9.6 | "Regenerate the KB for my new board DTS." | Blocked | KB regeneration flow needs custom DTS |
+| 9.1 | "I designed a custom board based on AM64x EVM. Dry-run the port." | Not run | Need AM64x SDK for this test |
+| 9.2 | "List every U-Boot and kernel file that references the reference board." | Not run | Reference scanning needs target SDK |
+| 9.3 | "Apply the copy to my new board directory." | Not run | `--apply` with no overwrite needs hardware |
+| 9.4 | "My board has different DDR. Which files must I edit?" | Not run | DDR/PMIC/PHY guidance needs specific board |
+| 9.5 | "No R5 on my SoC. Skip the R5 steps." | Not run | SoC-specific gating needs target SDK |
+| 9.6 | "Regenerate the KB for my new board DTS." | Not run | KB regeneration flow needs custom DTS |
 
 ### 10. ti-remoteproc (Firmware Load, Trace, Core Discovery)
 
@@ -166,24 +172,24 @@
 
 | # | Query | Result | Notes |
 |---|-------|--------|-------|
-| 11.1 | "Does my AM64x have PRU cores? Can I run PRU code?" | Blocked | Need AM64x SDK/board |
+| 11.1 | "Does my AM64x have PRU cores? Can I run PRU code?" | Not run | Need AM64x SDK/board |
 | 11.2 | "Same question on AM62P." | Pass | AM62P has no PRU (no ICSSG); KB pinmux shows no PRU; `pru-gate.sh` would exit 3 |
-| 11.3 | "Build the PRU 'blink' example for AM62x." | Blocked | Need AM62x SDK (AM62P has no PRU) |
-| 11.4 | "Load PRU firmware and verify rpmsg channel appears." | Blocked | No PRU on AM62P |
-| 11.5 | "The docs Lab 4 uses AM335x. Adapt it for AM62x." | Blocked | Cross-SoC doc adaptation needs AM62x SDK |
-| 11.6 | "ICSSG Ethernet driver owns some PRUs on AM64x. Detect it." | Blocked | Need AM64x with ICSSG Ethernet |
-| 11.7 | "No `clpru` in SDK. Where do I get it?" | Blocked | Toolchain acquisition: TI MCU+ SDK or separate PRU compiler package |
+| 11.3 | "Build the PRU 'blink' example for AM62x." | Not run | Need AM62x SDK (AM62P has no PRU) |
+| 11.4 | "Load PRU firmware and verify rpmsg channel appears." | Not run | No PRU on AM62P |
+| 11.5 | "The docs Lab 4 uses AM335x. Adapt it for AM62x." | Not run | Cross-SoC doc adaptation needs AM62x SDK |
+| 11.6 | "ICSSG Ethernet driver owns some PRUs on AM64x. Detect it." | Not run | Need AM64x with ICSSG Ethernet |
+| 11.7 | "No `clpru` in SDK. Where do I get it?" | Not run | Toolchain acquisition: TI MCU+ SDK or separate PRU compiler package |
 
 ### 12. ti-kernel-module (Out-of-Tree Build, Vermagic)
 
 | # | Query | Result | Notes |
 |---|-------|--------|-------|
-| 12.1 | "Build the example `hello.ko` against this SDK kernel." | Blocked | Needs example source; `build-module.sh` available |
-| 12.2 | "My module builds but won't load on the board. Check vermagic." | Blocked | Vermagic mismatch check needs built module |
-| 12.3 | "Build with a custom Kconfig option enabled." | Blocked | Kernel config dependency needs module source |
-| 12.4 | "Clean the build directory completely." | Blocked | `--clean` flag test needs build dir |
+| 12.1 | "Build the example `hello.ko` against this SDK kernel." | Not run | Not run as a separate query; the same build was done in A.3 (`hello.ko`, ELF aarch64; also `ti-kernel-module/references/kbuild-notes.md`). The example source is in `references/example-module/` |
+| 12.2 | "My module builds but won't load on the board. Check vermagic." | Not run | Vermagic mismatch check needs built module |
+| 12.3 | "Build with a custom Kconfig option enabled." | Not run | Kernel config dependency needs module source |
+| 12.4 | "Clean the build directory completely." | Not run | `--clean` flag test needs build dir |
 | 12.5 | "Build fails: 'TI_ARCH not set'. Fix the environment." | Pass | `ti-sdk-setup` loads env; `source lib/ti-sdk-env.sh` exports TI_ARCH=arm64 |
-| 12.6 | "Build for 32-bit ARM (R5) instead of A53." | Blocked | Cross-compiler selection: `CROSS_COMPILE_ARMV7` for R5 |
+| 12.6 | "Build for 32-bit ARM (R5) instead of A53." | Not run | Cross-compiler selection: `CROSS_COMPILE_ARMV7` for R5 |
 
 ### 13. ti-customize-clocks (cpufreq, OPP, LPM)
 
@@ -194,8 +200,8 @@
 | 13.3 | "Disable the 1.4 GHz OPP via device tree overlay." | Pass | DTBO built with `&a53_opp_table { opp-1400000000 { status = "disabled"; } }`; copied to /boot/dtb/ti/, added to uEnv.txt, rebooted → available frequencies now: 200000-1250000 (1.4 GHz removed) |
 | 13.4 | "Switch governor to `ondemand`. Then to `userspace` at 600 MHz." | Pass | ondemand set; userspace + `scaling_setspeed 600000` → cur_freq=600000 |
 | 13.5 | "Set LPM resume latency to 100 ms to allow deeper idle." | Pass | `echo 100000 > pm_qos_resume_latency_us` → 100000 confirmed |
-| 13.6 | "AM64x has no CPU OPP table. What does that mean?" | Blocked | Need AM64x SDK |
-| 13.7 | "Docs show Hz for `scaling_setspeed` but sysfs wants kHz. Clarify." | Blocked | Unit mismatch: sysfs uses kHz, docs may show Hz |
+| 13.6 | "AM64x has no CPU OPP table. What does that mean?" | Not run | Need AM64x SDK |
+| 13.7 | "Docs show Hz for `scaling_setspeed` but sysfs wants kHz. Clarify." | Not run | Unit mismatch: sysfs uses kHz, docs may show Hz |
 | 13.8 | "OPP masks differ per SoC (0x7 vs 0x6 vs 0x2). Explain." | Pass | AM62P: 0x1 0x7 (200-1000 MHz), 0x1 0x4 (1250-1400 MHz); speed grade hides higher OPPs |
 
 ### 14. ti-resource-partition (SysConfig, QoS, NAVSS)
@@ -207,28 +213,28 @@
 | 14.3 | "How does the QoS header reach U-Boot R5 stage?" | Pass | U-Boot `arch/arm/mach-k3/r5/am62px/am62p_qos_uboot.c` (copy of header), `setup_qos()` called from `am62p5_init.c`, `CONFIG_K3_QOS` in R5 defconfig |
 | 14.4 | "Give my R5 firmware exclusive DMA channel 5." | Pass | Edit `am62p-evm.syscfg` → regenerate `am62p_qos.h` → copy to U-Boot `am62p_qos_uboot.c` → rebuild R5 (`make u-boot-r5`) |
 | 14.5 | "The SDK has no tool directory. What do I do?" | Pass | SDK has tool; if missing, check `board-support/k3-respart-tool/` or docs |
-| 14.6 | "How does the allocation reach the DM firmware?" | Blocked | Documented gap in SDK/docs; user guide covers this |
+| 14.6 | "How does the allocation reach the DM firmware?" | Not run | Documented gap in SDK/docs; user guide covers this |
 
 ### 15. ti-yocto-build (oe-layersetup, bitbake)
 
 | # | Query | Result | Notes |
 |---|-------|--------|-------|
-| 15.1 | "Run the full Yocto setup for this SDK." | Blocked | Needs 100GB+ disk, `oe-layersetup.sh` with config file |
-| 15.2 | "My host has only 50 GB free. Will it work?" | Blocked | `check-host.sh` disk/swap check; needs >=100GB |
-| 15.3 | "Build `tisdk-default-image` for AM64x EVM." | Blocked | Need AM64x SDK; AM62P machine = am62pxx-evm |
-| 15.4 | "Which packages are missing on my Ubuntu 22.04?" | Blocked | Package list check needs host |
-| 15.5 | "The build failed. Where are the logs?" | Blocked | Log location: `build/tmp/work/.../temp/log.do_compile` |
-| 15.6 | "I need a custom image with my kernel config." | Blocked | Image customization flow needs Yocto setup |
+| 15.1 | "Run the full Yocto setup for this SDK." | Not run | Needs 100GB+ disk, `oe-layersetup.sh` with config file |
+| 15.2 | "My host has only 50 GB free. Will it work?" | Not run | `check-host.sh` disk/swap check; needs >=100GB |
+| 15.3 | "Build `tisdk-default-image` for AM64x EVM." | Not run | Need AM64x SDK; AM62P machine = am62pxx-evm |
+| 15.4 | "Which packages are missing on my Ubuntu 22.04?" | Not run | Package list check needs host |
+| 15.5 | "The build failed. Where are the logs?" | Not run | Log location: `build/tmp/work/.../temp/log.do_compile` |
+| 15.6 | "I need a custom image with my kernel config." | Not run | Image customization flow needs Yocto setup |
 
 ### 16. ti-yocto-custom-dt (Yocto Device Tree)
 
 | # | Query | Result | Notes |
 |---|------|--------|-------|
-| 16.1 | "My DTB builds in the SDK flow but not in Yocto. Why?" | Blocked | Machine config controls DTB list in Yocto |
-| 16.2 | "Add my custom DTB to the Yocto image." | Blocked | `KERNEL_DEVICETREE` in machine.conf |
-| 16.3 | "Write a `.bbappend` for my kernel recipe." | Blocked | Unverified syntax, marked as such |
-| 16.4 | "Use `local.conf` to append my DTB instead." | Blocked | Alternative method |
-| 16.5 | "The SDK DTB name differs from Yocto's. Reconcile." | Blocked | Naming convention diff |
+| 16.1 | "My DTB builds in the SDK flow but not in Yocto. Why?" | Not run | Machine config controls DTB list in Yocto |
+| 16.2 | "Add my custom DTB to the Yocto image." | Not run | `KERNEL_DEVICETREE` in machine.conf |
+| 16.3 | "Write a `.bbappend` for my kernel recipe." | Not run | Unverified syntax, marked as such |
+| 16.4 | "Use `local.conf` to append my DTB instead." | Not run | Alternative method |
+| 16.5 | "The SDK DTB name differs from Yocto's. Reconcile." | Not run | Naming convention diff |
 
 ### 17. ti-diagnostic (Health Snapshot)
 
@@ -248,13 +254,13 @@
 
 | # | Query | Result | Notes |
 |---|-------|--------|-------|
-| X.1 | "I changed a pinmux in the DTS. Rebuild kernel, rebuild overlay, deploy to SD, boot, verify GPIO works." | Blocked | Needs hardware GPIO test |
-| X.2 | "Add a new remote core firmware. Build it, load via remoteproc, check trace, verify rpmsg." | Blocked | Needs custom firmware build |
-| X.3 | "My custom board has different pinmux and a new PRU firmware. Port the board, build overlay, build PRU, deploy." | Blocked | Needs custom board |
+| X.1 | "I changed a pinmux in the DTS. Rebuild kernel, rebuild overlay, deploy to SD, boot, verify GPIO works." | Not run | Needs hardware GPIO test |
+| X.2 | "Add a new remote core firmware. Build it, load via remoteproc, check trace, verify rpmsg." | Not run | Needs custom firmware build |
+| X.3 | "My custom board has different pinmux and a new PRU firmware. Port the board, build overlay, build PRU, deploy." | Not run | Needs custom board |
 | X.4 | "Limit CPU to 600 MHz, set LPM to 200ms, verify power drop in diagnostic snapshot." | Pass | userspace governor + scaling_setspeed 600000 + pm_qos_resume_latency_us 200000 → diagnostic confirms 600MHz userspace, thermal 53-54°C |
-| X.5 | "Build Yocto image with my custom DTB and kernel config. Deploy to eMMC. Boot." | Blocked | Needs Yocto + eMMC |
+| X.5 | "Build Yocto image with my custom DTB and kernel config. Deploy to eMMC. Boot." | Not run | Needs Yocto + eMMC |
 | X.6 | "SDK version mismatch: docs say 12.01, I have 12.02. Show me all differences." | Pass | `list_versions()` has 12.01 not 12.02; use `version="latest"`; SDK is authority |
-| X.7 | "Move from AM62P SDK to AM64x SDK. What changes in my workflow?" | Blocked | Need AM64x SDK for comparison |
+| X.7 | "Move from AM62P SDK to AM64x SDK. What changes in my workflow?" | Not run | Need AM64x SDK for comparison |
 | X.8 | "I have no internet. Can I still use the skills?" | Pass | Yes - SDK only mode; docs MCP unavailable, use Rules.make + kernel DTS + KB; all skills work offline |
 
 ### Adversarial / Edge Cases
@@ -264,12 +270,12 @@
 | A.1 | "Load firmware on the HSM M4F." | Pass | Refused: HSM M4F status=reserved; `rproc.sh` gates on reserved cores |
 | A.2 | "Run PRU code on AM62P." | Pass | Gate exit 3: AM62P has no PRU (no ICSSG) |
 | A.3 | "Build kernel module for R5 (32-bit)." | Partial | R5 build fails (compiler mismatch with kernel: aarch64 vs arm); A53 build works (hello.ko ELF 64-bit aarch64, vermagic matches SDK kernel) |
-| A.4 | "Deploy to `/dev/sda` (my host disk)." | Blocked | `create-sdcard.sh` lists removable disks; `lsblk` check prevents host disk |
-| A.5 | "Flash eMMC boot0 on a board with no eMMC." | Blocked | `ls /dev/mmcblk*` on target detects eMMC presence |
-| A.6 | "Use `AM625_IOPAD` on AM64x." | Blocked | Macro gating: AM62PX_IOPAD ≠ AM625_IOPAD; SDK headers differ |
-| A.7 | "Disable all OPPs." | Blocked | Warn: at least one OPP must remain for boot |
-| A.8 | "Regenerate KB with `--dts` pointing to non-existent file." | Blocked | `gen-sdk-facts.py` exits with clear error |
-| A.9 | "Run `ti-generate-kb` on a directory without Rules.make." | Blocked | Early exit: "no Rules.make found" |
+| A.4 | "Deploy to `/dev/sda` (my host disk)." | Not run | `create-sdcard.sh` lists removable disks; `lsblk` check prevents host disk |
+| A.5 | "Flash eMMC boot0 on a board with no eMMC." | Not run | `ls /dev/mmcblk*` on target detects eMMC presence |
+| A.6 | "Use `AM625_IOPAD` on AM64x." | Not run | Host-only: there is no `AM625_IOPAD` in the SDK `k3-pinctrl.h` (the AM64x board DTS uses `AM64X_IOPAD`; both are in that one header) |
+| A.7 | "Disable all OPPs." | Not run | Warn: at least one OPP must remain for boot |
+| A.8 | "Regenerate KB with `--dts` pointing to non-existent file." | Partial | Run 2026-10-15 (synthetic SDK): the error is clear on stderr (`skipped sections: dt_identity (DTS file ... does not exist) (+5 more, same reason)`) and in `meta.skipped_sections`, but the exit status is 0 and a KB without device-tree sections is written. The expected "exits with clear error" did not happen |
+| A.9 | "Run `ti-generate-kb` on a directory without Rules.make." | Pass | Run 2026-10-15: exit 1, `gen-sdk-facts: <dir> has no Rules.make; not an SDK root`, nothing written |
 | A.10 | "Ask for a skill that doesn't exist (`ti-flash-spi`)." | Pass | Router says unknown skill; lists available skills |
 
 ---
@@ -285,13 +291,13 @@
 | Hallucination Rate | 0% | 0% | No hallucinations; all facts from SDK/docs/board |
 | Docs MCP Alignment | 100% | 95% | MCP has 12.01, SDK is 12.02; flagged and handled |
 | SDK vs Docs Discrepancy Detection | 100% | 100% | Multiple discrepancies found and reported (boot files, OPPs, versions) |
-| Hardware Dependency Detection | 100% | 100% | All hardware-needing queries correctly blocked |
+| Hardware Dependency Detection | 100% | not measured | The old "Blocked (needs hardware)" column also held host-only queries (overlay test-apply, macro checks, A.8/A.9), so it does not measure this |
 
 ### Key Result Areas (KRAs)
 
 | KRA | Status | Evidence |
 |-----|--------|----------|
-| Correct skill routing | Pass | Router correctly routes to all 17 skills; handles build-only path |
+| Correct skill routing | Pass | Router correctly routes to all 17 skills (ti-serial-console was added after this run and is not covered); handles build-only path |
 | Environment validation completeness | Pass | check-sdk.sh validates host, toolchains, sources, python modules |
 | Fact generation accuracy | Pass | KB matches board (model, cores, remoteproc, thermal, cpufreq, pads) |
 | Build command accuracy | Pass | All make targets discovered, built, staged correctly |
@@ -299,25 +305,25 @@
 | Boot chain expertise | Pass | Flow explained, security variants mapped, verification works |
 | Pinmux/GPIO precision | Pass | KB accurate; live gpioinfo 4 chips/168 lines; pad dump 206 pins; conflict detection |
 | DT overlay workflow | Partial | U-Boot `name_overlays` works; configfs not supported; test-apply needs DT rebuild |
-| Custom board portability | Blocked | Needs custom board |
+| Custom board portability | Not run | Needs custom board |
 | Remoteproc core/firmware mapping | Pass | DT ↔ board match; firmware names correct; states understood |
 | PRU gating & build | Pass | Correctly detects no PRU on AM62P |
 | Kernel module vermagic handling | Partial | Env validation passes; A53 build works (hello.ko 64-bit, vermagic matches); R5 build fails (compiler mismatch) |
 | Clock/OPP/LPM control | Pass | KB accurate; sysfs control verified (max freq, governor, userspace, LPM, 1.4 GHz OPP disabled via DTBO+reboot) |
 | Resource partitioning knowledge | Pass | Tool present (am62p-evm.syscfg, am62p_qos.h); U-Boot integration traced; DMA channel allocation path documented |
-| Yocto build orchestration | Blocked | Needs 100GB+ disk |
-| Yocto DT integration | Blocked | Needs Yocto setup |
+| Yocto build orchestration | Not run | Needs 100GB+ disk |
+| Yocto DT integration | Not run | Needs Yocto setup |
 | Diagnostic interpretation | Pass | GPU firmware missing; attached core; thermal; dmesg filtered; x86 valid; no jq needed |
 | Cross-skill workflow | Partial | Setup→KB→Build→Deploy→Validate works; clocks verified on hardware; offline mode verified |
-| Adversarial rejection | Pass | Reserved core, no PRU, bad paths, missing SDK, unknown skill all rejected correctly |
+| Adversarial rejection | Partial | Reserved core, no PRU, missing SDK (A.9), unknown skill rejected; a non-existent `--dts` is reported but exits 0 (A.8) |
 
 ---
 
 ## Final Assessment
 
-**Overall: 79/133 queries executed (59%)**
+**Overall: 84/138 queries executed (61%): 81 Pass, 3 Partial, 54 not run** (after the 2026-10-15 corrections)
 
-**Completed (79):**
+**Completed (81 Pass, 3 Partial):**
 - All setup, KB generation, build-source core tests
 - Deploy SD card (user ran), boot verification
 - Boot chain flow + security variants
@@ -330,23 +336,43 @@
 - Adversarial: reserved core (HSM M4F), no PRU on AM62P, missing SDK, unknown skill rejected
 - Cross-skill: offline mode (no internet), version mismatch (MCP 12.01 vs SDK 12.02) handled; clocks verified on hardware
 
-**Truly blocked by hardware (51):**
-- GPIO: AM64X macro decode (need AM64x board), mux mode for ball B25 (need TRM/PinMux tool)
-- DT overlay: PWM build/test-apply, UART4 overlay, bad label error, DSS conflict, batch validation (need DT rebuild + boot test)
+**Not run (54)** (reasons differ: board or destructive step, another SDK, or host-only work not executed):
+- GPIO: AM64X macro decode and wrong-macro check (host-only, not run), mux mode for ball B25 (TRM/PinMux tool), GPIO toggle (7.3, withdrawn)
+- DT overlay: PWM build/test-apply, UART4 overlay, bad label error, DSS conflict, batch validation (all host-only except booting the result; not run)
 - Custom board port (6) - need custom board
 - PRU (6 on AM62P - no PRU; 1 on AM64x)
-- Kernel module build (4 remaining) - R5 build fails (compiler mismatch); A53 build works
+- Kernel module (5) - not run as separate queries; the A53 build itself was done in A.3 (R5 is not a module target: see ti-kernel-module Troubleshooting)
 - Clocks: OPP disable via overlay (verified on hardware, 1 blocked for completeness)
 - Resource partition tool execution (2) - need SysConfig tool run (DMA channel allocation path known)
 - Yocto build (6) + Yocto DT (5) - need 100GB+ disk
 - Cross-skill workflows (6) - need custom hardware/firmware
-- Adversarial (6) - need specific edge conditions
+- Adversarial (4) - host disk, no-eMMC board, wrong macro (host-only), disable all OPPs
 
 **Recommendations:**
 1. AM62P SDK + booted board validates: setup, KB, build, deploy, boot-chain, remoteproc, diagnostic, GPIO (read/conflict/pad dump), clocks (sysfs + OPP disable), DT overlay U-Boot path, resource partition
 2. For full coverage: need AM64x SDK/board (PRU, 4x R5F), custom board, Yocto build host (100GB+), SysConfig tool
-3. DT overlay test-apply (PWM/UART4/DSS/batch) / kernel-module R5 / Yocto need hardware-in-loop
+3. DT overlay test-apply (PWM/UART4/DSS/batch) and the macro checks are host-only and can be run now; Yocto needs a build host
 4. All skills correctly reject invalid operations (adversarial tests pass)
 
-**KPIs met:** Accuracy 100% (79/79), Hallucination 0%, Hardware detection 100%
+**KPIs:** 81 Pass with no Fail recorded; one earlier Pass (7.3) withdrawn because it does not fit the code it ran. "Hardware detection" is not measured (see above).
 **Gaps:** Hardware-dependent skills (DT overlay test-apply, PRU, kernel-module R5, Yocto) need physical test infrastructure
+
+---
+
+## Corrections (2026-10-15)
+
+Made while reviewing the repo; no SDK or board was available, so only A.8 and A.9 were re-run (against a
+synthetic SDK). Everything else is a status or note correction against evidence already in the repo.
+
+| Item | Was | Now | Reason |
+|---|---|---|---|
+| Column "Blocked (needs hardware)" | | "Not run" | It also held host-only and other-SDK queries |
+| 5.3 | Blocked, "No eMMC on AM62P5 SK" | Not run | `ti-deploy-image/references/emmc.md` shows the live board's `mmcblk0` is eMMC with `boot0`/`boot1` |
+| 7.1, 7.6, A.6 | Blocked, "different headers" / "need AM64x board" | Not run, host-only | All `*_IOPAD` macros are in one `k3-pinctrl.h` (`ti-gpio-pinmux` step 1) |
+| 7.3 | Pass | Not run (withdrawn) | `gpioset -z` in `write` kept the line requested; see commit f360c17 |
+| 8.1, 8.2, 8.3, 8.6, 8.7 | Blocked, "needs hardware" | Not run, host-only (8.2: boot test needs board) | `build-dtbo.sh -b` test-applies on the host |
+| 12.1 | Blocked, "needs example source" | Not run, see A.3 | Example source ships in `references/example-module/`; A.3 built it |
+| A.8 | Blocked | Partial (run) | Reported clearly but exits 0 and writes a KB |
+| A.9 | Blocked | Pass (run) | Exit 1 with a clear message |
+| KPI "Hardware detection 100%", KRA "Adversarial: Pass" | | updated | Follow from the rows above |
+| Summary table | 133 queries, 79/0/3/51 | 138 queries, 81/0/3/54 | Recounted from the detail rows; the old table disagreed with them in 10 of 19 sections (e.g. ti-boot-chain rows are 8 Pass, table said 3 Pass / 5 Blocked) |

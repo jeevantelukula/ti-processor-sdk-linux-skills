@@ -1,4 +1,4 @@
-# Stress-Test Queries for All 17 Skills
+# Stress-Test Queries (17 skills; ti-serial-console, added later, has none yet)
 
 Run these in a workspace installed with `install.sh --workspace ~/ws --sdk <sdk> --mcp <url>`.
 Each query targets a specific skill. Expected skill is shown in brackets.
