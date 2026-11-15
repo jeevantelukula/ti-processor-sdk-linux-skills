@@ -23,15 +23,21 @@ explicitly (`device=$TI_DOCS_DEVICE`, `os="linux"`, `version=$TI_SDK_VERSION_DOC
   The page is a few lines long and links an external "K3 Resource Partitioning Tool user guide" for usage.
   If search finds no such page for the device, the device docs do not cover the tool: say so.
 - `ti_processor_sdk_docs_search(query="DMA channel ring allocation host QoS", ...)` for related context.
+- The user guide is external to the docs MCP: "Resource Partitioning Tool for Multi-Core SoCs" on TIREX
+  (`https://dev.ti.com/tirex/content/tirex-product-tree/processors-utilities_1_1_0/k3_resource_configuration_users_guide.html`).
+  Step 3 follows it (read 2026-11-15). If the user has a newer copy, theirs wins; report differences.
 
 ## Prerequisites
 
 - SDK installed; `source <skills-root>/lib/ti-sdk-env.sh` (`TI_SDK_ROOT`, `TI_SOC`, `TI_UBOOT_SRC_DIR`).
   Tool path: `$TI_SDK_ROOT/board-support/k3-respart-tool/`. If it does not exist, this SDK does not
   ship the tool; do not borrow another SoC's files.
-- To run the tool: TI SysConfig and the user guide linked from the docs. The `.syscfg` header names
-  the product and tool version (example: `K3-RESOURCE-CONFIGURATION@1.0.0`, tool `1.21.2`). No CLI is
-  documented in the SDK tree or the docs page, so none is given here.
+- To run the tool: TI SysConfig (ti.com/tool/SYSCONFIG, guide: install under `~/ti` on Linux). The `.syscfg`
+  header names the product and tool version (example: `K3-RESOURCE-CONFIGURATION@1.0.0`, tool `1.21.2`).
+- The tool is a GUI. The guide documents only a command line that launches that GUI
+  (`~/ti/sysconfig_<version>/sysconfig_gui.sh --product <tool-path>/.metadata/product.json`); it documents
+  no headless or batch generation command, so none is given here. The agent cannot generate the files:
+  the user runs the GUI and downloads the outputs (step 3).
 - Per-device facts: generated KB (`$TI_KB`, via `ti-generate-kb`) if present, else the SDK tree.
 
 ## Steps
@@ -42,6 +48,7 @@ explicitly (`device=$TI_DOCS_DEVICE`, `os="linux"`, `version=$TI_SDK_VERSION_DOC
 T=$TI_SDK_ROOT/board-support/k3-respart-tool
 cat $T/manifest.txt ; ls -a $T $T/out ; ls $T/.meta/data/*/ ; ls $T/.meta/modules/*/
 head -n 8 $T/out/*.syscfg           # @cliArgs line: device, package, product, tool version
+ls -l $T/.metadata/product.json     # the file SysConfig is launched with (guide); if absent, say so
 ```
 
 Generic layout (same on every SDK that ships the tool; verify with the `ls` above):
@@ -73,32 +80,68 @@ find arch/arm/mach-k3 -name '*_qos*'
 ```
 
 Example - the consumer is the R5 SPL: `arch/arm/mach-k3/r5/<soc>/<soc>_qos_uboot.c`
-(`struct k3_qos_data qos_data[]`, `K3_QOS_REG`/`K3_QOS_VAL`), a copy of the header next to it
-(with a license banner, so not byte-identical to `out/`), and `setup_qos()` in
+(`struct k3_qos_data qos_data[]`, `K3_QOS_REG`/`K3_QOS_VAL`), the header next to it (the guide lists
+`<soc>_qos.h` and `<soc>_qos_uboot.c` as two separate generated outputs, so the `.c` is never made by
+copying the header; the example SDK's `out/` held only the header), and `setup_qos()` in
 `arch/arm/mach-k3/common.c` (guarded by `CONFIG_K3_QOS`, enabled in the R5 defconfig; check with
 `grep -n K3_QOS $TI_UBOOT_SRC_DIR/configs/<r5 defconfig>`), called from the SoC init file. In the same SDK the
 grep finds QoS tables only for some SoCs; a SoC with no `*_qos_uboot.c` has no U-Boot QoS table in this SDK.
 
-## QoS Change Workflow
-1. Edit `.syscfg` in SysConfig GUI (or CLI) to reassign DMA channels/rings/QOS for hosts
-2. Regenerate: tool writes `out/<soc>_qos.h` with updated `QOS_n`, `ORDERID_n`, `ASEL_n`, `EPRIORITY_n`, `VIRTID_n`, `ATYPE_n` macros
-3. Copy to U-Boot: `cp out/<soc>_qos.h $TI_UBOOT_SRC_DIR/arch/arm/mach-k3/r5/<soc>/<soc>_qos_uboot.c` (update the struct array)
-4. Rebuild R5: `make u-boot-r5` (produces `tiboot3*.bin` with new QoS config)
-5. Deploy: copy `tiboot3.bin` to boot partition (or `make u-boot_stage` + `ti-deploy-image`)
+The resource allocation itself is the Resource Management Board Configuration (`rm-cfg.yaml`,
+`tifs-rm-cfg.yaml`, under `board/ti/<soc-dir>/` per the guide). Per the guide, the bootloader passes it to System
+Firmware during boot. See how the build consumes it: `find $TI_UBOOT_SRC_DIR/board/ti -name '*rm-cfg*'` and
+`grep -rln 'rm-cfg' $TI_UBOOT_SRC_DIR/arch/arm/dts`. How System Firmware applies it is not in the SDK tree.
 
-How the `.syscfg` resource allocation (rm-cfg) reaches the device manager firmware is not documented in the SDK tree
-or the docs page; read the user guide rather than assume.
+### 3. Change and deploy a configuration (the user runs the tool; this follows the user guide)
+
+1. Pick the tool. The SDK-bundled tool (`$T`) matches the SDK. The online tool
+   (`https://dev.ti.com/sysconfig/?product=K3-RESOURCE-CONFIGURATION`, TI login) always targets the latest SDK
+   release; for an older SDK the guide says to use the tool locally.
+2. The user launches SysConfig with `--product "$T"/.metadata/product.json` (or browses to `$T` in the GUI),
+   selects the device (default Package and Variant), then opens the existing `$T/out/*.syscfg` with Browse, or
+   starts from "Latest Baseline Design" (the guide's recommendation) or "Empty Design".
+3. The user edits host resource counts, resource sharing, bandwidth limiters and QoS. Errors in the Problems
+   tab block file generation. The Resource Allocation Table (three-dot menu) shows the split per host.
+4. The user saves the `.syscfg`, then downloads each file marked updated in the Generated Files panel.
+   Guide table, rows whose Used by is U-Boot (the other rows are for k3-image-gen, PDK and MCU+ SDK flows):
+
+   | File | Destination (the guide's table cuts the path off) |
+   |---|---|
+   | `rm-cfg.yaml`, `tifs-rm-cfg.yaml` | `ti-u-boot/board/ti/<soc...>/` |
+   | `<soc>_qos.h`, `<soc>_qos_uboot.c` | `ti-u-boot/arch/arm/mac...` (the `arch/arm/mach-k3` tree above) |
+
+   Locate the real destinations in `$TI_UBOOT_SRC_DIR` with the `find` commands above; do not guess paths.
+5. Back up and compare before replacing, and get the user's confirmation for each file (this overwrites SDK
+   source). Copy each downloaded file onto the file with the same name. Never copy `<soc>_qos.h` over
+   `<soc>_qos_uboot.c`.
+   ```
+   cp -p <sdk file> <sdk file>.orig
+   diff -u <sdk file>.orig <downloaded file>
+   ```
+6. Rebuild the affected stage (target names from `$TI_KB`; an R5 stage exists only on some SoCs, for example
+   `make u-boot-r5`, then `make u-boot_stage`), then deploy with `ti-deploy-image`.
+7. Guide warning: incorrect resource configuration can stop the system booting or cause run-time failures.
+   Before the first boot, keep the previous working `tiboot3.bin` and the `.syscfg`, and have the serial
+   console ready (`ti-serial-console`). Confirm the exact boot medium with the user before replacing files on it.
 
 ## Verify
 
-- `diff` the regenerated header against the U-Boot copy to confirm only intended entries changed.
-- Rebuild the R5 target, deploy `tiboot3` and confirm the board still boots to Linux.
-- Check `dmesg` for DMA/ti-sci errors after boot; the expected clean output is defined in the user guide.
+- `diff` each regenerated file against its `.orig` backup: only the intended entries changed.
+- Rebuild succeeds; `verify-boot-artifacts.sh` (`ti-boot-chain`) shows the new `tiboot3` differs from the old one.
+- The board still boots to Linux; check the serial boot log and `dmesg` for DMA or TI-SCI errors.
+  The expected clean output is defined in the user guide, not here.
 
 ## Troubleshooting
 
 - Tool outputs not picked up by the SDK build: expected, nothing in `Makefile`/`makerules` invokes
-  the tool; U-Boot consumes only the copied QoS header/table.
+  the tool; U-Boot consumes only the files you copied in step 3.
 - `board-support/k3-respart-tool` missing, or its `out/` and `.meta/.../<soc>/` names do not match
   `$TI_SOC`: use only that SDK's own tool contents, and say what is missing.
-- A docs page of a few lines is the real content; usage is in the external user guide.
+- Guide error `ERROR : Assigned resource count exceeds by X`: total allocations across hosts exceed the
+  hardware limit; reduce or redistribute.
+- Guide error `XYZ is not generated when configuration errors exist`: fix the Problems tab, then regenerate.
+- Guide error `No product with name 'K3-RESOURCE-CONFIGURATION' and version X.X.X found` (desktop SysConfig):
+  the software product was not selected; launch with `--product <tool-path>/.metadata/product.json`.
+- Removing resources from a host leaves the ALL column unchanged in the Resource Allocation Table: those
+  resources are tied to that host in hardware (for example some interrupts); no action needed (guide).
+- The docs page is a few lines long; usage is in the user guide (Docs section).
