@@ -65,6 +65,8 @@ Standalone check (host, no kernel build):
 ```bash
 skills/ti-device-tree-overlay/scripts/build-dtbo.sh my.dtso -o my.dtbo -b <base>.dtb
 ```
+It uses the SDK's `dtc` and `fdtoverlay` (kernel `scripts/dtc`, else the `linux-devkit` host sysroot), never the
+host's; `DTC=` and `FDTOVERLAY=` override the lookup, and the `dtc` path used is printed.
 This runs `cpp` with the kernel include paths, `dtc -@`, then `fdtoverlay` against the base DTB; it fails if a
 label or path is missing (exit status non-zero). Tested (example, AM62P SDK; other SoCs behave the same): `k3-am62p5-sk-rpi-hdr-ehrpwm.dtso` applied cleanly to the
 `k3-am62p5-sk.dtb` compiled from the kernel DTS; a fragment pointing at a non-existent label failed with `FDT_ERR_NOTFOUND`. The
